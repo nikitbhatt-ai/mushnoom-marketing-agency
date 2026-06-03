@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Design system (Spec §5): flat, clean white surfaces, 0.5px borders, generous
+  whitespace, NO gradients / NO shadows, sans-serif, sentence case.
+*/
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  background: theme("colors.canvas");
+  color: theme("colors.ink");
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Hairline border helpers — the spec's signature 0.5px line. */
+.border-hair {
+  border: 0.5px solid theme("colors.line");
+}
+.border-hair-t {
+  border-top: 0.5px solid theme("colors.line");
+}
+.border-hair-b {
+  border-bottom: 0.5px solid theme("colors.line");
+}
+.border-hair-r {
+  border-right: 0.5px solid theme("colors.line");
+}
+
+/* A flat card: white surface, hairline border, no shadow. */
+.card {
+  background: theme("colors.surface");
+  border: 0.5px solid theme("colors.line");
+  border-radius: 10px;
+}
