@@ -108,6 +108,21 @@ export async function getContentItems(): Promise<ContentItem[]> {
   return data.map(rowToContentItem);
 }
 
+/** Fetch a single content item by id (live only — render needs the real row). */
+export async function getContentItemById(
+  id: string
+): Promise<ContentItem | null> {
+  const db = getServiceClient();
+  if (!db) return null;
+  const { data, error } = await db
+    .from("content_items")
+    .select("*, source_files(drive_file_id)")
+    .eq("id", id)
+    .maybeSingle();
+  if (error || !data) return null;
+  return rowToContentItem(data);
+}
+
 export async function getSourceFiles(): Promise<SourceFile[]> {
   const db = getServiceClient();
   if (!db) return MOCK_SOURCES;
@@ -405,6 +420,35 @@ export async function updateContentItemCopy(
     .select("*, source_files(drive_file_id)")
     .single();
   if (error || !data) throw new Error(error?.message ?? "update failed");
+  return rowToContentItem(data);
+}
+
+/**
+ * Attach rendered asset URLs to an item. asset_url is a single column, but a
+ * carousel is many pages, so the cover (page 1) goes in asset_url for previews
+ * and the full ordered list lives in copy.asset_urls. Touches pixels only —
+ * never copy, status, or the claims gate.
+ */
+export async function updateContentItemAssets(
+  id: string,
+  pageUrls: string[]
+): Promise<ContentItem> {
+  const db = getServiceClient();
+  if (!db) throw new Error("Supabase is not configured.");
+  const { data: existing } = await db
+    .from("content_items")
+    .select("copy")
+    .eq("id", id)
+    .maybeSingle();
+  const prevCopy = (existing?.copy as Record<string, unknown>) ?? {};
+  const nextCopy = { ...prevCopy, asset_urls: pageUrls };
+  const { data, error } = await db
+    .from("content_items")
+    .update({ copy: nextCopy, asset_url: pageUrls[0] ?? null })
+    .eq("id", id)
+    .select("*, source_files(drive_file_id)")
+    .single();
+  if (error || !data) throw new Error(error?.message ?? "asset update failed");
   return rowToContentItem(data);
 }
 

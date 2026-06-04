@@ -7,8 +7,9 @@
 // keys the autofill API fills. Re-verify with the `get-brand-template-dataset` MCP tool
 // if a template is re-published. All current fields are plain text.
 //
-// TODO(Phase 3): canva.ts renderCarousel/renderStatic will look up a template by key,
-// map generated ContentCopy onto its `fields`, call autofill, export PNG → Storage.
+// Phase 3 render path (the "hands"): fielder maps approved ContentCopy onto a
+// template's `fields`, canva.renderTemplate autofills + exports PNG, storage
+// rehosts it public, and the asset URLs attach to the content_item.
 
 import type { ContentFormat } from "../types";
 
