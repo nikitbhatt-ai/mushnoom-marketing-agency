@@ -23,10 +23,11 @@ create table if not exists clients (
 create table if not exists source_files (
   id            uuid primary key default gen_random_uuid(),
   client_id     uuid not null references clients(id) on delete cascade,
-  source        text,                  -- e.g. 'google_drive'
+  source        text,                  -- 'google_drive' | 'upload' | 'url'
   drive_file_id text,
+  name          text,                  -- display name (uploads/links); Drive rows derive one
   type          text,                  -- video | audio | image | doc
-  transcript    text,
+  transcript    text,                  -- extracted text we draft from
   frames_url    text,
   ingested_at   timestamptz not null default now()
 );

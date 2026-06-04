@@ -71,9 +71,10 @@ function rowToSourceFile(r: any): SourceFile {
   return {
     id: r.id,
     clientId: r.client_id,
-    name: driveNameFor(r.drive_file_id),
+    // Uploads/links carry a real name; seeded Drive rows derive a friendly one.
+    name: r.name ?? driveNameFor(r.drive_file_id),
     type: r.type,
-    driveFileId: r.drive_file_id,
+    driveFileId: r.drive_file_id ?? "",
     transcript: r.transcript ?? "",
     ingestedAt: r.ingested_at,
   };
@@ -114,6 +115,18 @@ export async function getSourceFiles(): Promise<SourceFile[]> {
     .order("ingested_at", { ascending: false });
   if (error || !data) return MOCK_SOURCES;
   return data.map(rowToSourceFile);
+}
+
+export async function getSourceFileById(id: string): Promise<SourceFile | null> {
+  const db = getServiceClient();
+  if (!db) return null;
+  const { data, error } = await db
+    .from("source_files")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error || !data) return null;
+  return rowToSourceFile(data);
 }
 
 export async function getDecisions(): Promise<Decision[]> {
@@ -251,4 +264,136 @@ export async function getDashboardCounts(): Promise<typeof MOCK_WEEK> {
   ).length;
 
   return { published, awaitingReview, scheduled, generatedToday };
+}
+
+// --- writes (Phase 3+) -------------------------------------------------------
+
+/**
+ * Resolve the client we operate for. Today there is exactly one (Mushnoom), so
+ * we take the first row. When we run multiple brands this becomes a real lookup.
+ * Returns null if Supabase isn't configured (callers should bail to the demo).
+ */
+export async function getDefaultClientId(): Promise<string | null> {
+  const db = getServiceClient();
+  if (!db) return null;
+  const { data, error } = await db
+    .from("clients")
+    .select("id")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data.id;
+}
+
+/** Insert an ingested source (uploaded PDF or research link) and return it. */
+export async function createSourceFile(input: {
+  clientId: string;
+  name: string;
+  source: string; // 'upload' | 'url'
+  transcript: string;
+}): Promise<SourceFile> {
+  const db = getServiceClient();
+  if (!db) throw new Error("Supabase is not configured.");
+  const { data, error } = await db
+    .from("source_files")
+    .insert({
+      client_id: input.clientId,
+      name: input.name,
+      source: input.source,
+      type: "doc",
+      transcript: input.transcript,
+    })
+    .select("*")
+    .single();
+  if (error || !data) throw new Error(error?.message ?? "insert failed");
+  return rowToSourceFile(data);
+}
+
+/**
+ * Update an existing draft's copy in place. Used by manual edits and by
+ * "regenerate" (which re-runs the Amplifier into the same row instead of leaving
+ * an orphan draft behind). Preserves the pillar and any claims fields not passed.
+ */
+export async function updateContentItemCopy(
+  id: string,
+  copy: ContentItem["copy"],
+  claims?: {
+    verdict: ContentItem["claimsVerdict"];
+    flags: ContentItem["claimsFlags"];
+  }
+): Promise<ContentItem> {
+  const db = getServiceClient();
+  if (!db) throw new Error("Supabase is not configured.");
+  const { data: existing } = await db
+    .from("content_items")
+    .select("copy")
+    .eq("id", id)
+    .maybeSingle();
+  const prevCopy = (existing?.copy as Record<string, unknown>) ?? {};
+  const nextCopy: Record<string, unknown> = {
+    ...prevCopy,
+    hook: copy.hook,
+    slides: copy.slides,
+    caption: copy.caption,
+    hashtags: copy.hashtags,
+  };
+  if (claims) {
+    nextCopy.claims_verdict = claims.verdict;
+    nextCopy.claims_flags = claims.flags;
+  }
+  // Editing copy can change claims, so it must be re-checked by a human.
+  const { data, error } = await db
+    .from("content_items")
+    .update({ copy: nextCopy, claims_checked: false })
+    .eq("id", id)
+    .select("*, source_files(drive_file_id)")
+    .single();
+  if (error || !data) throw new Error(error?.message ?? "update failed");
+  return rowToContentItem(data);
+}
+
+/** A draft to persist, as produced by the Amplifier for one format. */
+export interface DraftInput {
+  clientId: string;
+  sourceFileId: string;
+  format: ContentItem["format"];
+  platform: ContentItem["platform"];
+  pillar: ContentItem["pillar"];
+  copy: ContentItem["copy"];
+  claimsVerdict: ContentItem["claimsVerdict"];
+  claimsFlags: ContentItem["claimsFlags"];
+}
+
+/**
+ * Insert generated drafts into content_items. They always land as `draft` with
+ * claims_checked=false — nothing here can move toward scheduled/posted, which
+ * stays a human, approval-gated step (hard rules 1 & 3).
+ */
+export async function insertContentDrafts(
+  drafts: DraftInput[]
+): Promise<ContentItem[]> {
+  const db = getServiceClient();
+  if (!db) throw new Error("Supabase is not configured.");
+  const rows = drafts.map((d) => ({
+    client_id: d.clientId,
+    source_file_id: d.sourceFileId,
+    format: d.format,
+    platform: d.platform,
+    status: "draft",
+    claims_checked: false,
+    approved_by: null,
+    copy: {
+      ...d.copy,
+      pillar: d.pillar,
+      claims_verdict: d.claimsVerdict,
+      claims_flags: d.claimsFlags,
+    },
+  }));
+  const { data, error } = await db
+    .from("content_items")
+    .insert(rows)
+    .select("*, source_files(drive_file_id)");
+  if (error || !data) throw new Error(error?.message ?? "insert failed");
+  return data.map(rowToContentItem);
 }
