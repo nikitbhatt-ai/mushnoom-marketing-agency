@@ -352,7 +352,9 @@ function AddSource({ onAdded }: { onAdded: (s: SourceFile) => void }) {
   return (
     <div className="mt-3 border-t pt-3" style={{ borderColor: "#eee" }}>
       <div className="text-[11px] uppercase tracking-wide text-faint">Add a source</div>
+      <p className="mt-1 text-[11px] text-faint">Use any one of these.</p>
 
+      {/* Option 1 — research link */}
       <div className="mt-2 flex gap-2">
         <input
           type="url"
@@ -372,10 +374,13 @@ function AddSource({ onAdded }: { onAdded: (s: SourceFile) => void }) {
         </button>
       </div>
 
+      <OrDivider />
+
+      {/* Option 2 — upload a PDF */}
       <button
         onClick={() => fileRef.current?.click()}
         disabled={busy}
-        className="mt-2 w-full rounded-md px-3 py-1.5 text-xs text-muted hover:text-ink disabled:opacity-40"
+        className="w-full rounded-md px-3 py-1.5 text-xs text-muted hover:text-ink disabled:opacity-40"
         style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
       >
         {busy ? "Working…" : "Upload a PDF"}
@@ -388,19 +393,21 @@ function AddSource({ onAdded }: { onAdded: (s: SourceFile) => void }) {
         className="hidden"
       />
 
+      <OrDivider />
+
+      {/* Option 3 — paste the text directly (works when a site blocks bots) */}
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
-        rows={3}
-        placeholder="…or paste article text (best for sites that block bots)"
-        className="mt-2 w-full rounded-md px-2.5 py-1.5 text-xs text-ink outline-none"
+        rows={4}
+        placeholder="Paste article text here…"
+        className="w-full rounded-md px-2.5 py-1.5 text-xs text-ink outline-none"
         style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
       />
       <button
         onClick={onAddText}
         disabled={busy || !text.trim()}
-        className="mt-2 w-full rounded-md px-3 py-1.5 text-xs text-muted hover:text-ink disabled:opacity-40"
-        style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+        className="mt-2 w-full rounded-md bg-ink px-3 py-1.5 text-xs text-white disabled:opacity-40"
       >
         {busy ? "Working…" : "Add pasted text"}
       </button>
@@ -494,6 +501,17 @@ function BrandVoiceEditor({ initial }: { initial: string }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** A small "or" rule that separates the equal source options. */
+function OrDivider() {
+  return (
+    <div className="my-2 flex items-center gap-2">
+      <div className="h-px flex-1" style={{ backgroundColor: "#eee" }} />
+      <span className="text-[10px] uppercase tracking-wide text-faint">or</span>
+      <div className="h-px flex-1" style={{ backgroundColor: "#eee" }} />
     </div>
   );
 }
