@@ -299,6 +299,7 @@ export function GeneratorClient({
 /** Upload a PDF or paste a research link; ingests via /api/ingest. */
 function AddSource({ onAdded }: { onAdded: (s: SourceFile) => void }) {
   const [url, setUrl] = useState("");
+  const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -312,6 +313,7 @@ function AddSource({ onAdded }: { onAdded: (s: SourceFile) => void }) {
       if (res.ok && json.source) {
         onAdded(json.source as SourceFile);
         setUrl("");
+        setText("");
         if (fileRef.current) fileRef.current.value = "";
       } else {
         setError(json.error || `Ingest failed (${res.status}).`);
@@ -321,6 +323,14 @@ function AddSource({ onAdded }: { onAdded: (s: SourceFile) => void }) {
     } finally {
       setBusy(false);
     }
+  }
+
+  function onAddText() {
+    if (!text.trim()) return;
+    void send({
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: text.trim() }),
+    });
   }
 
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -377,6 +387,23 @@ function AddSource({ onAdded }: { onAdded: (s: SourceFile) => void }) {
         onChange={onFile}
         className="hidden"
       />
+
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={3}
+        placeholder="…or paste article text (best for sites that block bots)"
+        className="mt-2 w-full rounded-md px-2.5 py-1.5 text-xs text-ink outline-none"
+        style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+      />
+      <button
+        onClick={onAddText}
+        disabled={busy || !text.trim()}
+        className="mt-2 w-full rounded-md px-3 py-1.5 text-xs text-muted hover:text-ink disabled:opacity-40"
+        style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+      >
+        {busy ? "Working…" : "Add pasted text"}
+      </button>
 
       {error && <p className="mt-2 text-[11px] text-red-600">{error}</p>}
     </div>
