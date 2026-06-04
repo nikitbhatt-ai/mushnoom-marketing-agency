@@ -1,4 +1,5 @@
 import { getServiceClient, isSupabaseConfigured } from "./supabase";
+import { DEFAULT_BRAND_VOICE_GUIDELINES } from "@/lib/agents/amplifier.config";
 import {
   CONTENT_ITEMS as MOCK_CONTENT,
   DECISIONS as MOCK_DECISIONS,
@@ -7,6 +8,7 @@ import {
   THIS_WEEK as MOCK_WEEK,
 } from "@/lib/mock/data";
 import type {
+  BrandVoice,
   ContentItem,
   Decision,
   MetricCardData,
@@ -284,6 +286,59 @@ export async function getDefaultClientId(): Promise<string | null> {
     .maybeSingle();
   if (error || !data) return null;
   return data.id;
+}
+
+/**
+ * Read the operating client's brand voice (the editable "skill"). Falls back to
+ * the default Mushnoom voice when nothing is stored or Supabase isn't configured,
+ * so generation and the editor always have something to work with.
+ */
+export async function getClientBrandVoice(): Promise<BrandVoice> {
+  const db = getServiceClient();
+  if (!db) return { guidelines: DEFAULT_BRAND_VOICE_GUIDELINES };
+  const { data, error } = await db
+    .from("clients")
+    .select("brand_voice")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  const bv = (data?.brand_voice as Partial<BrandVoice> | null) ?? null;
+  if (error || !bv) return { guidelines: DEFAULT_BRAND_VOICE_GUIDELINES };
+  return {
+    tone: bv.tone,
+    claims: bv.claims,
+    guidelines: (bv.guidelines ?? "").trim() || DEFAULT_BRAND_VOICE_GUIDELINES,
+  };
+}
+
+/**
+ * Save an edited brand voice to the operating client. Preserves the legacy
+ * tone/claims summary fields and only replaces `guidelines`.
+ */
+export async function updateClientBrandVoice(
+  guidelines: string
+): Promise<BrandVoice> {
+  const db = getServiceClient();
+  if (!db) throw new Error("Supabase is not configured.");
+  const clientId = await getDefaultClientId();
+  if (!clientId) throw new Error("No client to update.");
+  const { data: existing } = await db
+    .from("clients")
+    .select("brand_voice")
+    .eq("id", clientId)
+    .maybeSingle();
+  const prev = (existing?.brand_voice as Record<string, unknown>) ?? {};
+  const next = { ...prev, guidelines };
+  const { error } = await db
+    .from("clients")
+    .update({ brand_voice: next })
+    .eq("id", clientId);
+  if (error) throw new Error(error.message);
+  return {
+    tone: prev.tone as string | undefined,
+    claims: prev.claims as string | undefined,
+    guidelines,
+  };
 }
 
 /** Insert an ingested source (uploaded PDF or research link) and return it. */

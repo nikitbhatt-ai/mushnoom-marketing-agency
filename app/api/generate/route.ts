@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
-import { amplifierConfig } from "@/lib/agents/amplifier.config";
+import {
+  amplifierConfig,
+  buildAmplifierSystemPrompt,
+} from "@/lib/agents/amplifier.config";
 import { runAgent } from "@/lib/agents/runAgent";
 import { isAnthropicConfigured, QuotaExceededError } from "@/lib/agents/anthropic";
 import {
+  getClientBrandVoice,
   getDefaultClientId,
   getSourceFileById,
   insertContentDrafts,
@@ -32,6 +36,8 @@ interface GenerateBody {
   formats: ContentFormat[];
   platform: Platform;
   pillar: Pillar;
+  /** Optional freeform steer for THIS batch (e.g. "punchier, lead with energy"). */
+  instructions?: string;
   /** When set, re-run a single format INTO this existing draft (regenerate). */
   replaceId?: string;
 }
@@ -59,7 +65,7 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
-  const { sourceId, formats, platform, pillar, replaceId } = body;
+  const { sourceId, formats, platform, pillar, instructions, replaceId } = body;
   if (!sourceId || !formats?.length) {
     return NextResponse.json(
       { error: "sourceId and at least one format are required." },
@@ -92,13 +98,27 @@ export async function POST(req: Request) {
     );
   }
 
+  // Compose the system prompt from the client's saved brand voice (the editable
+  // "skill"). Falls back to the default voice when none is stored.
+  const brandVoice = await getClientBrandVoice();
+  const config = {
+    ...amplifierConfig,
+    systemPrompt: buildAmplifierSystemPrompt({ guidelines: brandVoice.guidelines }),
+  };
+
   try {
     // One Amplifier call per requested format so each draft is purpose-built.
     const drafts: DraftInput[] = [];
     for (const format of formats) {
       const { data } = await runAgent<AmplifierOutput>(
-        amplifierConfig,
-        buildInput({ format, platform, pillar, transcript: source.transcript }),
+        config,
+        buildInput({
+          format,
+          platform,
+          pillar,
+          transcript: source.transcript,
+          instructions,
+        }),
         clientId
       );
       const claimsFlags = data.claims_flags ?? [];
@@ -146,6 +166,7 @@ function buildInput(args: {
   platform: Platform;
   pillar: Pillar;
   transcript: string;
+  instructions?: string;
 }): string {
   const formatHint =
     args.format === "carousel"
@@ -154,13 +175,23 @@ function buildInput(args: {
       ? "A short-form reel: the hook is the on-screen/spoken opener; slides are the shot-by-shot script beats. The spoken words are claims too."
       : "A single static post: put the whole idea in the hook; leave slides empty.";
 
-  return [
+  const lines = [
     `Create one ${args.format} for ${args.platform}.`,
     `Content pillar: ${args.pillar}.`,
     `Format guidance: ${formatHint}`,
     `Draw only from the source material below — do not invent facts or benefits not supported by it.`,
-    ``,
-    `SOURCE MATERIAL:`,
-    args.transcript,
-  ].join("\n");
+  ];
+
+  const steer = args.instructions?.trim();
+  if (steer) {
+    // Per-run steering. Stays subordinate to the brand voice and claims rules.
+    lines.push(
+      ``,
+      `EXTRA INSTRUCTIONS FOR THIS PIECE (follow unless they conflict with the brand voice or claims rules):`,
+      steer
+    );
+  }
+
+  lines.push(``, `SOURCE MATERIAL:`, args.transcript);
+  return lines.join("\n");
 }

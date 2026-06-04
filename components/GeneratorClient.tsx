@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Badge, ClaimsBadge, PlatformChip } from "@/components/Badge";
 import type {
+  BrandVoice,
   ContentFormat,
   ContentItem,
   Pillar,
@@ -28,9 +29,11 @@ const PILLARS: { id: Pillar; label: string }[] = [
 export function GeneratorClient({
   sources,
   pool,
+  brandVoice,
 }: {
   sources: SourceFile[];
   pool: ContentItem[];
+  brandVoice: BrandVoice;
 }) {
   // Sources can grow at runtime as the user uploads PDFs / adds links.
   const [sourceList, setSourceList] = useState<SourceFile[]>(sources);
@@ -38,6 +41,7 @@ export function GeneratorClient({
   const [formats, setFormats] = useState<ContentFormat[]>(["carousel"]);
   const [platform, setPlatform] = useState<Platform>("instagram");
   const [pillar, setPillar] = useState<Pillar>("education");
+  const [instructions, setInstructions] = useState("");
   const [drafts, setDrafts] = useState<ContentItem[] | null>(null);
   const [generating, setGenerating] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -79,7 +83,13 @@ export function GeneratorClient({
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sourceId, formats, platform, pillar }),
+        body: JSON.stringify({
+          sourceId,
+          formats,
+          platform,
+          pillar,
+          instructions: instructions.trim() || undefined,
+        }),
       });
       if (res.ok) {
         const { drafts: made } = await res.json();
@@ -117,6 +127,7 @@ export function GeneratorClient({
           formats: [draft.format],
           platform: draft.platform,
           pillar: draft.pillar,
+          instructions: instructions.trim() || undefined,
           replaceId: draft.id.startsWith("gen-") ? undefined : draft.id,
         }),
       });
@@ -224,6 +235,18 @@ export function GeneratorClient({
               ))}
             </div>
 
+            <div className="mt-4 text-xs font-medium text-ink">
+              Extra instructions <span className="text-faint">(optional)</span>
+            </div>
+            <textarea
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+              rows={2}
+              placeholder="Steer this batch — e.g. “punchier, lead with the cordyceps-for-athletes angle.”"
+              className="mt-2 w-full rounded-md px-2.5 py-1.5 text-xs text-ink outline-none"
+              style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+            />
+
             <button
               onClick={generate}
               disabled={generating || formats.length === 0 || !sourceId}
@@ -232,6 +255,8 @@ export function GeneratorClient({
               {generating ? "Generating…" : "Generate drafts"}
             </button>
           </div>
+
+          <BrandVoiceEditor initial={brandVoice.guidelines} />
         </div>
 
         {/* Right: drafts */}
@@ -354,6 +379,94 @@ function AddSource({ onAdded }: { onAdded: (s: SourceFile) => void }) {
       />
 
       {error && <p className="mt-2 text-[11px] text-red-600">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * Edit the persistent brand voice (the "skill") and save it to the client. The
+ * saved guidelines are injected into every future generation. Compliance rules
+ * are NOT shown here — they live in code and can't be edited away.
+ */
+function BrandVoiceEditor({ initial }: { initial: string }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  async function save() {
+    if (!text.trim()) return;
+    setSaving(true);
+    setStatus(null);
+    try {
+      const res = await fetch("/api/brand-voice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ guidelines: text.trim() }),
+      });
+      if (res.ok) {
+        setStatus("Saved — applies to the next generation.");
+      } else {
+        const { error } = await res.json().catch(() => ({ error: "" }));
+        setStatus(
+          res.status === 501
+            ? "Can't save without a database connection."
+            : `Save failed${error ? `: ${error}` : ""}.`
+        );
+      }
+    } catch {
+      setStatus("Couldn't reach the server.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="card p-5">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between text-left"
+      >
+        <div>
+          <div className="text-xs font-medium text-ink">Brand voice</div>
+          <p className="mt-1 text-xs text-muted">
+            The voice every draft is written in. Compliance rules are always on.
+          </p>
+        </div>
+        <span className="ml-2 shrink-0 text-xs text-faint">
+          {open ? "Hide" : "Edit"}
+        </span>
+      </button>
+
+      {open && (
+        <div className="mt-3">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={14}
+            className="w-full rounded-md px-2.5 py-2 text-xs leading-relaxed text-ink outline-none"
+            style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+          />
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              onClick={save}
+              disabled={saving || !text.trim()}
+              className="rounded-md bg-ink px-3 py-1.5 text-xs text-white disabled:opacity-40"
+            >
+              {saving ? "Saving…" : "Save voice"}
+            </button>
+            <button
+              onClick={() => setText(initial)}
+              disabled={saving || text === initial}
+              className="rounded-md px-3 py-1.5 text-xs text-muted hover:text-ink disabled:opacity-40"
+              style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+            >
+              Reset
+            </button>
+            {status && <span className="text-[11px] text-muted">{status}</span>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -4,6 +4,14 @@
 
 export type ClientMode = "execution" | "strategy";
 
+/** A client's editable brand voice. `guidelines` is the rich spec injected into
+ * the Amplifier prompt on every generation; tone/claims are legacy summary fields. */
+export interface BrandVoice {
+  tone?: string;
+  claims?: string;
+  guidelines: string;
+}
+
 export type ContentFormat = "carousel" | "static" | "reel";
 
 export type Platform = "instagram" | "tiktok";
