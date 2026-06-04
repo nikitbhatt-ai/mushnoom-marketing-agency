@@ -15,7 +15,7 @@ import {
   logUsage,
 } from "./anthropic";
 
-const EXTRACT_MODEL = "claude-haiku-4-5";
+const EXTRACT_MODEL = "claude-haiku-4-5-20251001";
 
 const EXTRACT_SYSTEM = `You extract the substantive content from a document so it can be used as raw source material for social media drafting.
 
