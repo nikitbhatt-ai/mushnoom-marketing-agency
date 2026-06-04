@@ -98,18 +98,23 @@ export async function POST(req: Request) {
     );
   }
 
-  // Compose the system prompt from the client's saved brand voice (the editable
-  // "skill"). Falls back to the default voice when none is stored.
+  // The client's saved brand voice (the editable "skill"). Falls back to the
+  // default voice when none is stored. The per-format craft playbook is composed
+  // on top of this inside the loop.
   const brandVoice = await getClientBrandVoice();
-  const config = {
-    ...amplifierConfig,
-    systemPrompt: buildAmplifierSystemPrompt({ guidelines: brandVoice.guidelines }),
-  };
 
   try {
-    // One Amplifier call per requested format so each draft is purpose-built.
+    // One Amplifier call per requested format so each draft is purpose-built —
+    // and so the format's craft playbook is injected into the skill per call.
     const drafts: DraftInput[] = [];
     for (const format of formats) {
+      const config = {
+        ...amplifierConfig,
+        systemPrompt: buildAmplifierSystemPrompt({
+          guidelines: brandVoice.guidelines,
+          format,
+        }),
+      };
       const { data } = await runAgent<AmplifierOutput>(
         config,
         buildInput({
@@ -168,17 +173,13 @@ function buildInput(args: {
   transcript: string;
   instructions?: string;
 }): string {
-  const formatHint =
-    args.format === "carousel"
-      ? "A 5–7 slide carousel: a strong hook slide, then one idea per slide, ending on a soft CTA."
-      : args.format === "reel"
-      ? "A short-form reel: the hook is the on-screen/spoken opener; slides are the shot-by-shot script beats. The spoken words are claims too."
-      : "A single static post: put the whole idea in the hook; leave slides empty.";
-
+  // The rich per-format craft now lives in the skill (FORMAT_PLAYBOOKS, injected
+  // into the system prompt), so the user turn just states the job and defers to
+  // it — one source of truth, no contradictory guidance.
   const lines = [
     `Create one ${args.format} for ${args.platform}.`,
     `Content pillar: ${args.pillar}.`,
-    `Format guidance: ${formatHint}`,
+    `Follow the ${args.format} playbook in your instructions.`,
     `Draw only from the source material below — do not invent facts or benefits not supported by it.`,
   ];
 

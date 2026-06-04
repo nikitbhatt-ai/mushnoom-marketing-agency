@@ -1,4 +1,5 @@
 import type { AgentConfig } from "./runAgent";
+import type { ContentFormat } from "../types";
 
 /**
  * Amplifier agent config (Spec §9).
@@ -22,6 +23,58 @@ const CLAIMS_RULES = `HARD CLAIMS RULES (never violate):
 - NEVER disease claims ("treats", "cures", "prevents", "diagnoses").
 - Include the FDA disclaimer where a benefit is stated: "*These statements have not been evaluated by the FDA. Not intended to diagnose, treat, cure, or prevent any disease."
 - Reels: the spoken words in the clip are claims too — hold them to the same rules.`;
+
+/**
+ * HOOK CRAFT — the single highest-leverage line in any piece. A weak hook means
+ * the rest is never read, so the skill treats the hook as a first-class craft,
+ * not an afterthought. Always-on, every format.
+ */
+const HOOK_CRAFT = `HOOK CRAFT (the scroll-stopper — get this right first):
+- One specific, concrete line. "The foggy hour after lunch" beats "brain fog."
+- Open a loop: a relatable tension, an aspirational vision, or a surprising-but-true fact. Make them need the next line.
+- Lead with the human moment, not the mushroom. Earn the product.
+- No clickbait, no fearmongering, no "doctors hate this." If it overpromises, it's wrong.
+- Good: "Your 3pm slump isn't a coffee problem." / "The calmest part of my evening starts 20 minutes before bed now."
+- Bad: "This mushroom will change your life!" / "Boost your brain instantly!"`;
+
+/**
+ * FORMAT PLAYBOOKS — each format is a different craft. The right playbook is
+ * injected per generation (one Amplifier call per format) so a carousel, a
+ * static, and a reel are each built to their own shape, not from one generic
+ * mould. These mirror the published Canva brand templates in
+ * lib/integrations/canva-templates.ts — the place a rendered asset ends up.
+ */
+export const FORMAT_PLAYBOOKS: Record<ContentFormat, string> = {
+  carousel: `FORMAT — CAROUSEL (3–7 slides):
+- Slide 1 IS the hook, standing alone. It must work as a thumbnail with nothing else.
+- One idea per slide. Each slide earns the swipe by opening the next.
+- Build logically: tension → why it happens → the mushroom + the simple mechanism → what it feels like.
+- End on a soft, inspiring CTA, never a hard sell ("Here's to your calmest evening yet — reishi might be worth a look.").
+- ~1–2 short lines per slide. White space is part of the design.`,
+  static: `FORMAT — STATIC (single post):
+- The whole idea lives in the hook plus at most one supporting line.
+- It's one punch: a single relatable truth or aspirational image. No build, no slides.
+- If it needs a second idea to land, it's a carousel, not a static.`,
+  reel: `FORMAT — REEL (short-form video script):
+- The hook is the spoken AND on-screen opener — it lands in the first 1–2 seconds or the scroll wins.
+- Write shot-by-shot beats: each beat is one spoken line plus a brief on-screen text / visual cue.
+- Sound like a person talking to a friend on camera, not a voiceover script.
+- THE SPOKEN WORDS ARE CLAIMS. Hold every line to the claims rules — structure/function only.
+- End on a warm, simple CTA the creator can say out loud.`,
+};
+
+/**
+ * QUALITY BAR — a pre-submit self-check baked into the skill. The model runs
+ * this against its own draft before returning. This is the line between "any
+ * supplement brand" and Mushnoom.
+ */
+const QUALITY_BAR = `BEFORE YOU RETURN, check your own draft:
+- Does the hook stop the scroll on its own? If it reads generic, rewrite it.
+- Could this exact post come from any other supplement brand? If yes, it's wrong — make it unmistakably Mushnoom.
+- Is every benefit structure/function, with the FDA disclaimer where one is stated?
+- Is every science term immediately put into plain words?
+- Did you draw only from the source material — no invented facts or benefits?
+- Is it warm and aspirational, never clinical or hypey?`;
 
 /**
  * The default Mushnoom brand voice (the "social-content-creator skill"). This
@@ -70,19 +123,33 @@ Signature feel: A warm doctor friend who makes feeling your best feel simple and
  */
 export function buildAmplifierSystemPrompt(opts?: {
   guidelines?: string;
+  /** When set, inject that format's craft playbook. Omitted = generic fallback. */
+  format?: ContentFormat;
 }): string {
   const guidelines =
     (opts?.guidelines ?? "").trim() || DEFAULT_BRAND_VOICE_GUIDELINES;
-  return [
+  const parts = [
     `You are the social-content-creator for Mushnoom, a physician-founded functional-mushroom wellness brand.`,
     ``,
     `BRAND VOICE — write everything in this voice:`,
     guidelines,
     ``,
+    HOOK_CRAFT,
+  ];
+  // Per-format craft lives in the skill, not the plumbing. The caller composes
+  // one prompt per format so each draft is purpose-built for its shape.
+  if (opts?.format) {
+    parts.push(``, FORMAT_PLAYBOOKS[opts.format]);
+  }
+  parts.push(
+    ``,
     CLAIMS_RULES,
     ``,
-    `Return ONLY structured JSON matching the provided schema. For every claim you make, also populate claims_flags with anything a compliance reviewer should double-check.`,
-  ].join("\n");
+    QUALITY_BAR,
+    ``,
+    `Return ONLY structured JSON matching the provided schema. For every claim you make, also populate claims_flags with anything a compliance reviewer should double-check.`
+  );
+  return parts.join("\n");
 }
 
 /** Structured output schema: hook, slides[], caption, hashtags[], claims_flags[]. */
