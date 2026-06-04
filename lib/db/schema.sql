@@ -122,3 +122,18 @@ create index if not exists idx_content_items_client_status on content_items(clie
 create index if not exists idx_content_items_scheduled_for on content_items(scheduled_for);
 create index if not exists idx_metrics_log_client_metric   on metrics_log(client_id, metric, captured_at);
 create index if not exists idx_decisions_client_date       on decisions(client_id, date);
+
+-- ---------------------------------------------------------------------------
+-- Row Level Security: ON for every table, with NO public policies.
+-- The anon/publishable key therefore can't read or write anything. All app DB
+-- access happens server-side with the service-role key, which bypasses RLS.
+-- When Supabase Auth is added, per-table policies go here.
+-- ---------------------------------------------------------------------------
+alter table clients       enable row level security;
+alter table source_files  enable row level security;
+alter table content_items enable row level security;
+alter table review_queue  enable row level security;
+alter table post_log      enable row level security;
+alter table metrics_log   enable row level security;
+alter table decisions     enable row level security;
+alter table usage_log     enable row level security;

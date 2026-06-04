@@ -2,8 +2,11 @@ import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
 import { MetricCard } from "@/components/MetricCard";
 import { Badge } from "@/components/Badge";
-import { DECISIONS, METRIC_CARDS, THIS_WEEK } from "@/lib/mock/data";
+import { getDashboardCounts, getDecisions, getMetricCards } from "@/lib/db/queries";
 import type { Decision } from "@/lib/types";
+
+// Read fresh from Supabase on every request (don't bake data in at build time).
+export const dynamic = "force-dynamic";
 
 const DECISION_TONE: Record<Decision["status"], "ok" | "warn" | "bad" | "neutral"> = {
   win: "ok",
@@ -19,7 +22,13 @@ const DECISION_LABEL: Record<Decision["status"], string> = {
   pending: "Measuring",
 };
 
-export default function OverviewPage() {
+export default async function OverviewPage() {
+  const [metricCards, decisions, thisWeek] = await Promise.all([
+    getMetricCards(),
+    getDecisions(),
+    getDashboardCounts(),
+  ]);
+
   return (
     <div>
       <PageHeader
@@ -31,7 +40,7 @@ export default function OverviewPage() {
         {/* Metric cards */}
         <section>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {METRIC_CARDS.map((m) => (
+            {metricCards.map((m) => (
               <MetricCard key={m.key} data={m} />
             ))}
           </div>
@@ -39,14 +48,14 @@ export default function OverviewPage() {
 
         {/* This week */}
         <section className="card divide-x divide-line/70 grid grid-cols-2 sm:grid-cols-4">
-          <WeekStat label="Published this week" value={THIS_WEEK.published} />
+          <WeekStat label="Published this week" value={thisWeek.published} />
           <WeekStat
             label="Awaiting review"
-            value={THIS_WEEK.awaitingReview}
+            value={thisWeek.awaitingReview}
             href="/review"
           />
-          <WeekStat label="Scheduled" value={THIS_WEEK.scheduled} href="/calendar" />
-          <WeekStat label="Generated today" value={THIS_WEEK.generatedToday} href="/generator" />
+          <WeekStat label="Scheduled" value={thisWeek.scheduled} href="/calendar" />
+          <WeekStat label="Generated today" value={thisWeek.generatedToday} href="/generator" />
         </section>
 
         {/* Decision log — the moat */}
@@ -67,7 +76,7 @@ export default function OverviewPage() {
               <div className="col-span-3">Data behind it</div>
               <div className="col-span-3">Result</div>
             </div>
-            {DECISIONS.map((d) => (
+            {decisions.map((d) => (
               <div
                 key={d.id}
                 className="border-hair-b grid grid-cols-12 gap-4 px-5 py-4 text-sm last:border-b-0"

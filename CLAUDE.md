@@ -35,6 +35,15 @@ review/schedule → posting → analyst/reporting. Each phase must be usable alo
 - Honest and direct, no fluff. Flag scope creep back toward planning over shipping.
 
 ## Status
-- **Phase 1 (front-end prototype): in progress.** Four core screens built with mock
-  data from `lib/mock/data.ts`. No backend wired yet. Strategy + Report screens stubbed.
-- Phases 2–7: not started. Stubs live in `lib/` and `app/api/` with `// TODO(Phase N)`.
+- **Phase 1 (front-end prototype): done.** Four core screens + Strategy/Report stubs.
+- **Phase 2 (data layer): done.** Supabase project `raemy-ai` (ref cpvxkqqujwiwmqrpeomn)
+  with schema.sql applied, RLS on all tables (no public policies), seeded with
+  Mushnoom data. Screens read live via `lib/db/queries.ts` (server-side, service-role).
+  Falls back to `lib/mock/data.ts` when env is unset. `canPublish` guard in `lib/guards.ts`.
+  Writes (approve/generate) still come in their phases.
+- Phases 3–7: not started. Stubs live in `lib/` and `app/api/` with `// TODO(Phase N)`.
+
+## Supabase access pattern
+All DB access is SERVER-SIDE via the service-role key (`getServiceClient()`).
+Never import `lib/db/supabase.ts` into a client component. RLS is on with no
+public policies, so the anon key can't read data.

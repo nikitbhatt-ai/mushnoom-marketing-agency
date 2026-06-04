@@ -1,16 +1,19 @@
 import { PageHeader } from "@/components/PageHeader";
 import { Badge, PlatformChip } from "@/components/Badge";
-import { CONTENT_ITEMS } from "@/lib/mock/data";
+import { getContentItems } from "@/lib/db/queries";
 import type { ContentItem } from "@/lib/types";
+
+export const dynamic = "force-dynamic";
 
 // Prototype "today" matches the spec demo window.
 const TODAY = new Date("2026-06-03T00:00:00Z");
 const YEAR = 2026;
 const MONTH = 5; // June (0-indexed)
 
-export default function CalendarPage() {
+export default async function CalendarPage() {
+  const items = await getContentItems();
   // Anything with a scheduled (or already-posted) slot shows on the calendar.
-  const scheduled = CONTENT_ITEMS.filter(
+  const scheduled = items.filter(
     (c) => c.scheduledFor && (c.status === "scheduled" || c.status === "posted")
   );
 
