@@ -1,21 +1,21 @@
 import { NextResponse } from "next/server";
 import { updateContentItemCopy } from "@/lib/db/queries";
-import { isSupabaseConfigured } from "@/lib/db/supabase";
+import { isDbConfigured } from "@/lib/db/postgres";
 import type { ContentCopy } from "@/lib/types";
 
 export const runtime = "nodejs";
 
 // PATCH /api/content/[id] — persist a manual edit to a draft's copy.
 // Editing copy clears claims_checked (a human must re-verify). Used by the
-// generator's inline "Edit". Returns 501 when Supabase isn't configured so the
-// UI keeps the edit as a local-only preview.
+// generator's inline "Edit". Returns 501 when the database isn't configured so
+// the UI keeps the edit as a local-only preview.
 export async function PATCH(
   req: Request,
   { params }: { params: { id: string } }
 ) {
-  if (!isSupabaseConfigured()) {
+  if (!isDbConfigured()) {
     return NextResponse.json(
-      { error: "Supabase not configured; edit is local-only." },
+      { error: "Database not configured; edit is local-only." },
       { status: 501 }
     );
   }

@@ -1,4 +1,4 @@
-import { getServiceClient, isSupabaseConfigured } from "./supabase";
+import { isDbConfigured, query } from "./postgres";
 import { DEFAULT_BRAND_VOICE_GUIDELINES } from "@/lib/agents/amplifier.config";
 import {
   CONTENT_ITEMS as MOCK_CONTENT,
@@ -16,10 +16,10 @@ import type {
 } from "@/lib/types";
 
 /**
- * The data layer (Phase 2). Server-side reads from Supabase (the system of
- * record). When SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY aren't set, every
+ * The data layer (Phase 2). Server-side reads from Cloud SQL for PostgreSQL (the
+ * system of record) via the `pg` driver. When DATABASE_URL isn't set, every
  * function falls back to lib/mock/data so the Phase 1 demo keeps working and the
- * build never breaks. Add the env vars and the same screens render live data.
+ * build never breaks. Add the env var and the same screens render live data.
  *
  * The UI is written against lib/types.ts, so mapping happens HERE and nowhere
  * else — the screens don't know or care whether data came from Postgres or mock.
@@ -34,8 +34,9 @@ function rowToContentItem(r: any): ContentItem {
     id: r.id,
     clientId: r.client_id,
     sourceFileId: r.source_file_id,
-    sourceFileName: r.source_files?.drive_file_id
-      ? driveNameFor(r.source_files.drive_file_id)
+    // SQL join surfaces the linked file's Drive id as a flat column.
+    sourceFileName: r.source_file_drive_id
+      ? driveNameFor(r.source_file_drive_id)
       : undefined,
     format: r.format,
     platform: r.platform,
@@ -97,64 +98,71 @@ function rowToDecision(r: any): Decision {
 
 // --- reads -------------------------------------------------------------------
 
+// The content-item select always left-joins source_files so the mapper can show
+// a friendly file name. Defined once so reads and write-returns stay identical.
+const CONTENT_SELECT = `
+  select ci.*, sf.drive_file_id as source_file_drive_id
+  from content_items ci
+  left join source_files sf on sf.id = ci.source_file_id`;
+
 export async function getContentItems(): Promise<ContentItem[]> {
-  const db = getServiceClient();
-  if (!db) return MOCK_CONTENT;
-  const { data, error } = await db
-    .from("content_items")
-    .select("*, source_files(drive_file_id)")
-    .order("created_at", { ascending: false });
-  if (error || !data) return MOCK_CONTENT;
-  return data.map(rowToContentItem);
+  if (!isDbConfigured()) return MOCK_CONTENT;
+  try {
+    const rows = await query(`${CONTENT_SELECT} order by ci.created_at desc`);
+    return rows.map(rowToContentItem);
+  } catch (err) {
+    console.warn("getContentItems failed:", (err as Error).message);
+    return MOCK_CONTENT;
+  }
 }
 
 /** Fetch a single content item by id (live only — render needs the real row). */
 export async function getContentItemById(
   id: string
 ): Promise<ContentItem | null> {
-  const db = getServiceClient();
-  if (!db) return null;
-  const { data, error } = await db
-    .from("content_items")
-    .select("*, source_files(drive_file_id)")
-    .eq("id", id)
-    .maybeSingle();
-  if (error || !data) return null;
-  return rowToContentItem(data);
+  if (!isDbConfigured()) return null;
+  try {
+    const rows = await query(`${CONTENT_SELECT} where ci.id = $1`, [id]);
+    return rows[0] ? rowToContentItem(rows[0]) : null;
+  } catch (err) {
+    console.warn("getContentItemById failed:", (err as Error).message);
+    return null;
+  }
 }
 
 export async function getSourceFiles(): Promise<SourceFile[]> {
-  const db = getServiceClient();
-  if (!db) return MOCK_SOURCES;
-  const { data, error } = await db
-    .from("source_files")
-    .select("*")
-    .order("ingested_at", { ascending: false });
-  if (error || !data) return MOCK_SOURCES;
-  return data.map(rowToSourceFile);
+  if (!isDbConfigured()) return MOCK_SOURCES;
+  try {
+    const rows = await query(
+      `select * from source_files order by ingested_at desc`
+    );
+    return rows.map(rowToSourceFile);
+  } catch (err) {
+    console.warn("getSourceFiles failed:", (err as Error).message);
+    return MOCK_SOURCES;
+  }
 }
 
 export async function getSourceFileById(id: string): Promise<SourceFile | null> {
-  const db = getServiceClient();
-  if (!db) return null;
-  const { data, error } = await db
-    .from("source_files")
-    .select("*")
-    .eq("id", id)
-    .maybeSingle();
-  if (error || !data) return null;
-  return rowToSourceFile(data);
+  if (!isDbConfigured()) return null;
+  try {
+    const rows = await query(`select * from source_files where id = $1`, [id]);
+    return rows[0] ? rowToSourceFile(rows[0]) : null;
+  } catch (err) {
+    console.warn("getSourceFileById failed:", (err as Error).message);
+    return null;
+  }
 }
 
 export async function getDecisions(): Promise<Decision[]> {
-  const db = getServiceClient();
-  if (!db) return MOCK_DECISIONS;
-  const { data, error } = await db
-    .from("decisions")
-    .select("*")
-    .order("date", { ascending: false });
-  if (error || !data) return MOCK_DECISIONS;
-  return data.map(rowToDecision);
+  if (!isDbConfigured()) return MOCK_DECISIONS;
+  try {
+    const rows = await query(`select * from decisions order by date desc`);
+    return rows.map(rowToDecision);
+  } catch (err) {
+    console.warn("getDecisions failed:", (err as Error).message);
+    return MOCK_DECISIONS;
+  }
 }
 
 // --- metric cards: computed honestly from the metrics_log time series --------
@@ -208,14 +216,18 @@ const METRIC_ORDER = [
 ];
 
 export async function getMetricCards(): Promise<MetricCardData[]> {
-  const db = getServiceClient();
-  if (!db) return MOCK_METRICS;
+  if (!isDbConfigured()) return MOCK_METRICS;
 
-  const { data, error } = await db
-    .from("metrics_log")
-    .select("metric, value, captured_at")
-    .order("captured_at", { ascending: false });
-  if (error || !data) return MOCK_METRICS;
+  let data: { metric: string; value: number }[];
+  try {
+    data = await query(
+      `select metric, value, captured_at from metrics_log
+       order by captured_at desc`
+    );
+  } catch (err) {
+    console.warn("getMetricCards failed:", (err as Error).message);
+    return MOCK_METRICS;
+  }
 
   // Group by metric, newest first; [0] is current, [1] is the prior snapshot.
   const byMetric: Record<string, { value: number }[]> = {};
@@ -264,7 +276,7 @@ function formatDelta(diff: number, prior: number, fmt: MetricMeta["deltaFmt"]): 
 
 export async function getDashboardCounts(): Promise<typeof MOCK_WEEK> {
   const items = await getContentItems();
-  if (!isSupabaseConfigured()) return MOCK_WEEK;
+  if (!isDbConfigured()) return MOCK_WEEK;
 
   const now = new Date();
   const weekAgo = new Date(now.getTime() - 7 * 864e5);
@@ -291,16 +303,16 @@ export async function getDashboardCounts(): Promise<typeof MOCK_WEEK> {
  * Returns null if Supabase isn't configured (callers should bail to the demo).
  */
 export async function getDefaultClientId(): Promise<string | null> {
-  const db = getServiceClient();
-  if (!db) return null;
-  const { data, error } = await db
-    .from("clients")
-    .select("id")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  if (error || !data) return null;
-  return data.id;
+  if (!isDbConfigured()) return null;
+  try {
+    const rows = await query<{ id: string }>(
+      `select id from clients order by created_at asc limit 1`
+    );
+    return rows[0]?.id ?? null;
+  } catch (err) {
+    console.warn("getDefaultClientId failed:", (err as Error).message);
+    return null;
+  }
 }
 
 /**
@@ -309,21 +321,22 @@ export async function getDefaultClientId(): Promise<string | null> {
  * so generation and the editor always have something to work with.
  */
 export async function getClientBrandVoice(): Promise<BrandVoice> {
-  const db = getServiceClient();
-  if (!db) return { guidelines: DEFAULT_BRAND_VOICE_GUIDELINES };
-  const { data, error } = await db
-    .from("clients")
-    .select("brand_voice")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  const bv = (data?.brand_voice as Partial<BrandVoice> | null) ?? null;
-  if (error || !bv) return { guidelines: DEFAULT_BRAND_VOICE_GUIDELINES };
-  return {
-    tone: bv.tone,
-    claims: bv.claims,
-    guidelines: (bv.guidelines ?? "").trim() || DEFAULT_BRAND_VOICE_GUIDELINES,
-  };
+  if (!isDbConfigured()) return { guidelines: DEFAULT_BRAND_VOICE_GUIDELINES };
+  try {
+    const rows = await query<{ brand_voice: Partial<BrandVoice> | null }>(
+      `select brand_voice from clients order by created_at asc limit 1`
+    );
+    const bv = rows[0]?.brand_voice ?? null;
+    if (!bv) return { guidelines: DEFAULT_BRAND_VOICE_GUIDELINES };
+    return {
+      tone: bv.tone,
+      claims: bv.claims,
+      guidelines: (bv.guidelines ?? "").trim() || DEFAULT_BRAND_VOICE_GUIDELINES,
+    };
+  } catch (err) {
+    console.warn("getClientBrandVoice failed:", (err as Error).message);
+    return { guidelines: DEFAULT_BRAND_VOICE_GUIDELINES };
+  }
 }
 
 /**
@@ -333,22 +346,19 @@ export async function getClientBrandVoice(): Promise<BrandVoice> {
 export async function updateClientBrandVoice(
   guidelines: string
 ): Promise<BrandVoice> {
-  const db = getServiceClient();
-  if (!db) throw new Error("Supabase is not configured.");
+  if (!isDbConfigured()) throw new Error("Cloud SQL is not configured.");
   const clientId = await getDefaultClientId();
   if (!clientId) throw new Error("No client to update.");
-  const { data: existing } = await db
-    .from("clients")
-    .select("brand_voice")
-    .eq("id", clientId)
-    .maybeSingle();
-  const prev = (existing?.brand_voice as Record<string, unknown>) ?? {};
+  const existing = await query<{ brand_voice: Record<string, unknown> | null }>(
+    `select brand_voice from clients where id = $1`,
+    [clientId]
+  );
+  const prev = existing[0]?.brand_voice ?? {};
   const next = { ...prev, guidelines };
-  const { error } = await db
-    .from("clients")
-    .update({ brand_voice: next })
-    .eq("id", clientId);
-  if (error) throw new Error(error.message);
+  await query(`update clients set brand_voice = $1::jsonb where id = $2`, [
+    JSON.stringify(next),
+    clientId,
+  ]);
   return {
     tone: prev.tone as string | undefined,
     claims: prev.claims as string | undefined,
@@ -363,21 +373,15 @@ export async function createSourceFile(input: {
   source: string; // 'upload' | 'url'
   transcript: string;
 }): Promise<SourceFile> {
-  const db = getServiceClient();
-  if (!db) throw new Error("Supabase is not configured.");
-  const { data, error } = await db
-    .from("source_files")
-    .insert({
-      client_id: input.clientId,
-      name: input.name,
-      source: input.source,
-      type: "doc",
-      transcript: input.transcript,
-    })
-    .select("*")
-    .single();
-  if (error || !data) throw new Error(error?.message ?? "insert failed");
-  return rowToSourceFile(data);
+  if (!isDbConfigured()) throw new Error("Cloud SQL is not configured.");
+  const rows = await query(
+    `insert into source_files (client_id, name, source, type, transcript)
+     values ($1, $2, $3, 'doc', $4)
+     returning *`,
+    [input.clientId, input.name, input.source, input.transcript]
+  );
+  if (!rows[0]) throw new Error("insert failed");
+  return rowToSourceFile(rows[0]);
 }
 
 /**
@@ -393,14 +397,12 @@ export async function updateContentItemCopy(
     flags: ContentItem["claimsFlags"];
   }
 ): Promise<ContentItem> {
-  const db = getServiceClient();
-  if (!db) throw new Error("Supabase is not configured.");
-  const { data: existing } = await db
-    .from("content_items")
-    .select("copy")
-    .eq("id", id)
-    .maybeSingle();
-  const prevCopy = (existing?.copy as Record<string, unknown>) ?? {};
+  if (!isDbConfigured()) throw new Error("Cloud SQL is not configured.");
+  const existing = await query<{ copy: Record<string, unknown> | null }>(
+    `select copy from content_items where id = $1`,
+    [id]
+  );
+  const prevCopy = existing[0]?.copy ?? {};
   const nextCopy: Record<string, unknown> = {
     ...prevCopy,
     hook: copy.hook,
@@ -412,15 +414,20 @@ export async function updateContentItemCopy(
     nextCopy.claims_verdict = claims.verdict;
     nextCopy.claims_flags = claims.flags;
   }
-  // Editing copy can change claims, so it must be re-checked by a human.
-  const { data, error } = await db
-    .from("content_items")
-    .update({ copy: nextCopy, claims_checked: false })
-    .eq("id", id)
-    .select("*, source_files(drive_file_id)")
-    .single();
-  if (error || !data) throw new Error(error?.message ?? "update failed");
-  return rowToContentItem(data);
+  // Editing copy can change claims, so it must be re-checked by a human. The CTE
+  // updates the row, then re-joins source_files so the mapper gets the file name.
+  const rows = await query(
+    `with updated as (
+       update content_items set copy = $1::jsonb, claims_checked = false
+       where id = $2 returning *
+     )
+     select u.*, sf.drive_file_id as source_file_drive_id
+     from updated u
+     left join source_files sf on sf.id = u.source_file_id`,
+    [JSON.stringify(nextCopy), id]
+  );
+  if (!rows[0]) throw new Error("update failed");
+  return rowToContentItem(rows[0]);
 }
 
 /**
@@ -433,23 +440,25 @@ export async function updateContentItemAssets(
   id: string,
   pageUrls: string[]
 ): Promise<ContentItem> {
-  const db = getServiceClient();
-  if (!db) throw new Error("Supabase is not configured.");
-  const { data: existing } = await db
-    .from("content_items")
-    .select("copy")
-    .eq("id", id)
-    .maybeSingle();
-  const prevCopy = (existing?.copy as Record<string, unknown>) ?? {};
+  if (!isDbConfigured()) throw new Error("Cloud SQL is not configured.");
+  const existing = await query<{ copy: Record<string, unknown> | null }>(
+    `select copy from content_items where id = $1`,
+    [id]
+  );
+  const prevCopy = existing[0]?.copy ?? {};
   const nextCopy = { ...prevCopy, asset_urls: pageUrls };
-  const { data, error } = await db
-    .from("content_items")
-    .update({ copy: nextCopy, asset_url: pageUrls[0] ?? null })
-    .eq("id", id)
-    .select("*, source_files(drive_file_id)")
-    .single();
-  if (error || !data) throw new Error(error?.message ?? "asset update failed");
-  return rowToContentItem(data);
+  const rows = await query(
+    `with updated as (
+       update content_items set copy = $1::jsonb, asset_url = $2
+       where id = $3 returning *
+     )
+     select u.*, sf.drive_file_id as source_file_drive_id
+     from updated u
+     left join source_files sf on sf.id = u.source_file_id`,
+    [JSON.stringify(nextCopy), pageUrls[0] ?? null, id]
+  );
+  if (!rows[0]) throw new Error("asset update failed");
+  return rowToContentItem(rows[0]);
 }
 
 /** A draft to persist, as produced by the Amplifier for one format. */
@@ -472,27 +481,37 @@ export interface DraftInput {
 export async function insertContentDrafts(
   drafts: DraftInput[]
 ): Promise<ContentItem[]> {
-  const db = getServiceClient();
-  if (!db) throw new Error("Supabase is not configured.");
-  const rows = drafts.map((d) => ({
-    client_id: d.clientId,
-    source_file_id: d.sourceFileId,
-    format: d.format,
-    platform: d.platform,
-    status: "draft",
-    claims_checked: false,
-    approved_by: null,
-    copy: {
+  if (!isDbConfigured()) throw new Error("Cloud SQL is not configured.");
+  if (drafts.length === 0) return [];
+
+  // Build one multi-row INSERT. Each draft contributes 5 bound params; status,
+  // claims_checked and approved_by are fixed literals so nothing here can move a
+  // draft toward scheduled/posted (hard rules 1 & 3).
+  const params: unknown[] = [];
+  const values = drafts.map((d, i) => {
+    const copy = {
       ...d.copy,
       pillar: d.pillar,
       claims_verdict: d.claimsVerdict,
       claims_flags: d.claimsFlags,
-    },
-  }));
-  const { data, error } = await db
-    .from("content_items")
-    .insert(rows)
-    .select("*, source_files(drive_file_id)");
-  if (error || !data) throw new Error(error?.message ?? "insert failed");
-  return data.map(rowToContentItem);
+    };
+    params.push(d.clientId, d.sourceFileId, d.format, d.platform, JSON.stringify(copy));
+    const n = i * 5;
+    return `($${n + 1}, $${n + 2}, $${n + 3}, $${n + 4}, 'draft', false, null, $${n + 5}::jsonb)`;
+  });
+
+  const rows = await query(
+    `with inserted as (
+       insert into content_items
+         (client_id, source_file_id, format, platform, status, claims_checked, approved_by, copy)
+       values ${values.join(", ")}
+       returning *
+     )
+     select i.*, sf.drive_file_id as source_file_drive_id
+     from inserted i
+     left join source_files sf on sf.id = i.source_file_id`,
+    params
+  );
+  if (!rows.length) throw new Error("insert failed");
+  return rows.map(rowToContentItem);
 }

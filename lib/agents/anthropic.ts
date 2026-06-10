@@ -7,20 +7,63 @@
 // extractor both go through these helpers and can't skip them.
 
 import Anthropic from "@anthropic-ai/sdk";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { AnthropicVertex } from "@anthropic-ai/vertex-sdk";
+import { query } from "@/lib/db/postgres";
 
-/** Lazy singleton. Returns null when ANTHROPIC_API_KEY isn't set, so callers can
- * fall back to the prototype's simulated path instead of crashing. */
-let cached: Anthropic | null = null;
-export function getAnthropic(): Anthropic | null {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
-  if (!cached) cached = new Anthropic({ apiKey });
+/**
+ * Claude client. Two backends, same `.messages.create` surface:
+ *
+ *  - Vertex AI (GCP): set ANTHROPIC_VERTEX_PROJECT_ID + CLOUD_ML_REGION. Claude
+ *    is billed through your Google Cloud invoice and authenticates via the
+ *    runtime service account's Application Default Credentials — no API key.
+ *    Claude must be enabled in Vertex Model Garden first, and model IDs may take
+ *    a Vertex-specific form (override per-agent via env if needed — see below).
+ *  - Direct Anthropic API: set ANTHROPIC_API_KEY. Separate Anthropic invoice.
+ *
+ * Vertex wins when both are set, so flipping to GCP billing is one env var.
+ */
+
+// A Vertex client and a direct client expose the same messages API; this union
+// lets the rest of the app stay backend-agnostic.
+export type ClaudeClient = Anthropic | AnthropicVertex;
+
+const vertexProject = process.env.ANTHROPIC_VERTEX_PROJECT_ID;
+const vertexRegion = process.env.CLOUD_ML_REGION ?? process.env.ANTHROPIC_VERTEX_REGION;
+
+/** Lazy singleton. Returns null when neither backend is configured, so callers
+ * can fall back to the prototype's simulated path instead of crashing. */
+let cached: ClaudeClient | null = null;
+export function getAnthropic(): ClaudeClient | null {
+  if (!isAnthropicConfigured()) return null;
+  if (!cached) {
+    if (vertexProject) {
+      // ADC is picked up from the environment (the VM/Cloud Run service account).
+      cached = new AnthropicVertex({
+        projectId: vertexProject,
+        region: vertexRegion ?? "us-central1",
+      });
+    } else {
+      cached = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    }
+  }
   return cached;
 }
 
 export function isAnthropicConfigured(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
+  // Vertex needs a project (+ ADC, which we can't check here); direct needs a key.
+  return Boolean(vertexProject || process.env.ANTHROPIC_API_KEY);
+}
+
+/**
+ * Map a logical model id to the string the backend expects. Vertex sometimes
+ * uses suffixed publisher ids; allow per-model overrides via env
+ * (e.g. VERTEX_MODEL_CLAUDE_OPUS_4_8="claude-opus-4-8@20260...") without
+ * touching agent configs. Defaults to the logical id on both backends.
+ */
+export function resolveModel(model: string): string {
+  if (!vertexProject) return model;
+  const envKey = `VERTEX_MODEL_${model.toUpperCase().replace(/[-.]/g, "_")}`;
+  return process.env[envKey] ?? model;
 }
 
 /** Per-client monthly spend cap (USD). Override with MONTHLY_COST_QUOTA_USD. */
@@ -57,28 +100,25 @@ export class QuotaExceededError extends Error {
 }
 
 /** Sum this client's model cost for the current calendar month. */
-async function monthlySpend(
-  db: SupabaseClient,
-  clientId: string
-): Promise<number> {
+async function monthlySpend(clientId: string): Promise<number> {
   const startOfMonth = new Date();
   startOfMonth.setUTCDate(1);
   startOfMonth.setUTCHours(0, 0, 0, 0);
-  const { data, error } = await db
-    .from("usage_log")
-    .select("cost")
-    .eq("client_id", clientId)
-    .gte("created_at", startOfMonth.toISOString());
-  if (error || !data) return 0;
-  return data.reduce((sum, r) => sum + Number(r.cost ?? 0), 0);
+  try {
+    const rows = await query<{ total: string | null }>(
+      `select coalesce(sum(cost), 0) as total from usage_log
+       where client_id = $1 and created_at >= $2`,
+      [clientId, startOfMonth.toISOString()]
+    );
+    return Number(rows[0]?.total ?? 0);
+  } catch {
+    return 0;
+  }
 }
 
 /** Throw QuotaExceededError if the client is already over its monthly cap. */
-export async function assertWithinQuota(
-  db: SupabaseClient,
-  clientId: string
-): Promise<void> {
-  const spent = await monthlySpend(db, clientId);
+export async function assertWithinQuota(clientId: string): Promise<void> {
+  const spent = await monthlySpend(clientId);
   if (spent >= PER_CLIENT_MONTHLY_QUOTA_USD) {
     throw new QuotaExceededError(spent, PER_CLIENT_MONTHLY_QUOTA_USD);
   }
@@ -93,19 +133,18 @@ export interface Usage {
 /** Write one usage_log row (hard rule 4). Best-effort: a logging failure must
  * not lose the work we just paid for, so we swallow and warn. */
 export async function logUsage(
-  db: SupabaseClient,
   clientId: string,
   agent: string,
   model: string,
   usage: Usage
 ): Promise<void> {
-  const { error } = await db.from("usage_log").insert({
-    client_id: clientId,
-    agent,
-    model,
-    tokens_in: usage.tokensIn,
-    tokens_out: usage.tokensOut,
-    cost: usage.cost,
-  });
-  if (error) console.warn("usage_log insert failed:", error.message);
+  try {
+    await query(
+      `insert into usage_log (client_id, agent, model, tokens_in, tokens_out, cost)
+       values ($1, $2, $3, $4, $5, $6)`,
+      [clientId, agent, model, usage.tokensIn, usage.tokensOut, usage.cost]
+    );
+  } catch (err) {
+    console.warn("usage_log insert failed:", (err as Error).message);
+  }
 }

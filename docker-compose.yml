@@ -1,0 +1,74 @@
+# raemy ai — single-VM deployment (Google Compute Engine).
+#
+# Runs the whole stack on one box: Postgres (system of record), the Next.js app,
+# and a nightly pg_dump to Cloud Storage so the system of record is never one
+# disk failure away from gone. All secrets come from a .env file on the VM
+# (never committed) — see .env.example for the keys.
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-raemy_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-raemy}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # schema.sql runs once on first boot to create the tables.
+      - ./lib/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    # Postgres is reachable only by other containers, never published to the
+    # internet (no `ports:`). The app talks to it over the compose network.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-raemy_app} -d ${POSTGRES_DB:-raemy}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # The app reaches Postgres by the compose service name `db`.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-raemy_app}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-raemy}
+      # Claude via Vertex (GCP billing). ADC comes from the VM service account.
+      ANTHROPIC_VERTEX_PROJECT_ID: ${ANTHROPIC_VERTEX_PROJECT_ID}
+      CLOUD_ML_REGION: ${CLOUD_ML_REGION:-us-central1}
+      # Rendered-asset storage + cron auth + quota.
+      GCS_ASSETS_BUCKET: ${GCS_ASSETS_BUCKET}
+      CRON_SECRET: ${CRON_SECRET}
+      MONTHLY_COST_QUOTA_USD: ${MONTHLY_COST_QUOTA_USD:-50}
+    ports:
+      - "80:8080" # public HTTP -> Next.js. Put HTTPS in front via a load balancer or Caddy later.
+
+  # Nightly backup: pg_dump -> gzip -> gs://$BACKUP_BUCKET/. Uses the VM service
+  # account for GCS auth. The system of record gets a durable off-box copy.
+  backup:
+    image: google/cloud-sdk:slim
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      BACKUP_BUCKET: ${BACKUP_BUCKET}
+      POSTGRES_USER: ${POSTGRES_USER:-raemy_app}
+      POSTGRES_DB: ${POSTGRES_DB:-raemy}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apt-get update -qq && apt-get install -y -qq postgresql-client >/dev/null
+        while true; do
+          ts=$$(date -u +%Y%m%dT%H%M%SZ)
+          echo "[backup] dumping at $$ts"
+          pg_dump -h db -U "$$POSTGRES_USER" "$$POSTGRES_DB" | gzip \
+            | gsutil cp - "gs://$$BACKUP_BUCKET/raemy-$$ts.sql.gz" \
+            && echo "[backup] uploaded raemy-$$ts.sql.gz" || echo "[backup] FAILED"
+          sleep 86400
+        done
+
+volumes:
+  pgdata:

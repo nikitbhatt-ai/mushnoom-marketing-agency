@@ -1,5 +1,6 @@
--- raemy ai — Supabase (Postgres) schema · sole system of record
--- Run this in the Supabase SQL editor when wiring Phase 2.
+-- raemy ai — Cloud SQL for PostgreSQL schema · sole system of record
+-- Run this once against the Cloud SQL instance (see MIGRATION.md), e.g.
+--   psql "$DATABASE_URL" -f lib/db/schema.sql
 --
 -- WHY these tables: `decisions` + `metrics_log` are the moat and the product
 -- story (a queryable record of why every change was made and what it did).
@@ -125,16 +126,22 @@ create index if not exists idx_metrics_log_client_metric   on metrics_log(client
 create index if not exists idx_decisions_client_date       on decisions(client_id, date);
 
 -- ---------------------------------------------------------------------------
--- Row Level Security: ON for every table, with NO public policies.
--- The anon/publishable key therefore can't read or write anything. All app DB
--- access happens server-side with the service-role key, which bypasses RLS.
--- When Supabase Auth is added, per-table policies go here.
--- ---------------------------------------------------------------------------
-alter table clients       enable row level security;
-alter table source_files  enable row level security;
-alter table content_items enable row level security;
-alter table review_queue  enable row level security;
-alter table post_log      enable row level security;
-alter table metrics_log   enable row level security;
-alter table decisions     enable row level security;
-alter table usage_log     enable row level security;
+-- Security model on Cloud SQL.
+-- There is no anon key and no public REST layer anymore. The database is reached
+-- ONLY over the Cloud SQL connection (private IP / unix socket on Cloud Run), and
+-- the app authenticates as a dedicated least-privilege role. So the boundary is:
+--   1. network — Cloud SQL is not exposed to the public internet;
+--   2. role privileges — grant the app role only what it needs on these tables.
+--
+-- Example: create a role for the app and grant table access (run as a superuser
+-- such as the default `postgres` user; replace the password):
+--
+--   create role raemy_app login password 'CHANGE_ME';
+--   grant connect on database raemy to raemy_app;
+--   grant usage on schema public to raemy_app;
+--   grant select, insert, update, delete on all tables in schema public to raemy_app;
+--   alter default privileges in schema public
+--     grant select, insert, update, delete on tables to raemy_app;
+--
+-- Then point DATABASE_URL at raemy_app. (Row Level Security was a Supabase-era
+-- mechanism for the shared anon key; it is intentionally not used here.)

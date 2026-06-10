@@ -9,12 +9,13 @@
 // plumbing in one place means quota + usage logging can never be forgotten.
 
 import type Anthropic from "@anthropic-ai/sdk";
-import { getServiceClient } from "@/lib/db/supabase";
+import { isDbConfigured } from "@/lib/db/postgres";
 import {
   assertWithinQuota,
   estimateCost,
   getAnthropic,
   logUsage,
+  resolveModel,
 } from "./anthropic";
 
 export interface AgentConfig {
@@ -38,7 +39,7 @@ export interface RunAgentResult<T> {
  * expose a single tool whose input_schema IS the agent's outputSchema and force
  * the model to call it. The tool's arguments are then guaranteed to match shape.
  *
- * Requires both Supabase (to log usage / check quota) and an Anthropic key. The
+ * Requires both Cloud SQL (to log usage / check quota) and an Anthropic key. The
  * caller is expected to have checked configuration and fall back to the
  * simulated path otherwise — here we fail loudly rather than silently skip the
  * usage log (hard rule 4).
@@ -49,15 +50,14 @@ export async function runAgent<T>(
   clientId: string
 ): Promise<RunAgentResult<T>> {
   const anthropic = getAnthropic();
-  const db = getServiceClient();
   if (!anthropic) throw new Error("ANTHROPIC_API_KEY is not set.");
-  if (!db) throw new Error("Supabase is not configured; cannot log usage.");
+  if (!isDbConfigured()) throw new Error("Cloud SQL is not configured; cannot log usage.");
 
   // Hard rule 4: never start a call that would blow the monthly quota.
-  await assertWithinQuota(db, clientId);
+  await assertWithinQuota(clientId);
 
   const message = await anthropic.messages.create({
-    model: config.model,
+    model: resolveModel(config.model),
     max_tokens: config.maxTokens ?? 2048,
     system: config.systemPrompt,
     tools: [
@@ -75,7 +75,7 @@ export async function runAgent<T>(
   const tokensIn = message.usage.input_tokens;
   const tokensOut = message.usage.output_tokens;
   const cost = estimateCost(config.model, tokensIn, tokensOut);
-  await logUsage(db, clientId, config.name, config.model, {
+  await logUsage(clientId, config.name, config.model, {
     tokensIn,
     tokensOut,
     cost,

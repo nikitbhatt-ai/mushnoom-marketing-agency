@@ -7,12 +7,13 @@
 //
 // Like every model call, this logs tokens + cost and respects the quota.
 
-import { getServiceClient } from "@/lib/db/supabase";
+import { isDbConfigured } from "@/lib/db/postgres";
 import {
   assertWithinQuota,
   estimateCost,
   getAnthropic,
   logUsage,
+  resolveModel,
 } from "./anthropic";
 
 const EXTRACT_MODEL = "claude-haiku-4-5-20251001";
@@ -36,11 +37,10 @@ export async function extractSourceText(
   clientId: string
 ): Promise<ExtractResult> {
   const anthropic = getAnthropic();
-  const db = getServiceClient();
   if (!anthropic) throw new Error("ANTHROPIC_API_KEY is not set.");
-  if (!db) throw new Error("Supabase is not configured; cannot log usage.");
+  if (!isDbConfigured()) throw new Error("Cloud SQL is not configured; cannot log usage.");
 
-  await assertWithinQuota(db, clientId);
+  await assertWithinQuota(clientId);
 
   const content =
     input.kind === "pdf"
@@ -69,7 +69,7 @@ export async function extractSourceText(
         ];
 
   const message = await anthropic.messages.create({
-    model: EXTRACT_MODEL,
+    model: resolveModel(EXTRACT_MODEL),
     max_tokens: 4096,
     system: EXTRACT_SYSTEM,
     messages: [{ role: "user", content }],
@@ -78,7 +78,7 @@ export async function extractSourceText(
   const tokensIn = message.usage.input_tokens;
   const tokensOut = message.usage.output_tokens;
   const cost = estimateCost(EXTRACT_MODEL, tokensIn, tokensOut);
-  await logUsage(db, clientId, "extractor", EXTRACT_MODEL, {
+  await logUsage(clientId, "extractor", EXTRACT_MODEL, {
     tokensIn,
     tokensOut,
     cost,
