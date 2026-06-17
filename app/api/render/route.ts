@@ -1,16 +1,14 @@
 import { NextResponse } from "next/server";
 import { isAnthropicConfigured, QuotaExceededError } from "@/lib/agents/anthropic";
 import { fieldCopyForTemplate } from "@/lib/agents/fielder";
-import { renderTemplate } from "@/lib/integrations/canva";
+import { renderTemplatePages } from "@/lib/render/renderer";
 import {
-  getValidAccessToken,
-  isCanvaOAuthConfigured,
-} from "@/lib/integrations/canva-oauth";
-import { rehostImage } from "@/lib/integrations/storage";
-import {
-  CANVA_TEMPLATES,
-  type CanvaTemplateKey,
-} from "@/lib/integrations/canva-templates";
+  RENDER_TEMPLATES,
+  isRenderTemplateKey,
+  type RenderTemplateKey,
+} from "@/lib/render/templates";
+import { DEFAULT_ASPECT, isAspectKey, type AspectKey } from "@/lib/render/sizes";
+import { uploadImage } from "@/lib/integrations/storage";
 import {
   getContentItemById,
   getDefaultClientId,
@@ -20,22 +18,23 @@ import {
 export const runtime = "nodejs";
 
 // POST /api/render — the "hands" (Phase 3). Turns an item's copy into a real
-// on-brand asset: copy -> named template fields (fielder) -> Canva autofill + PNG
-// export -> rehosted public URLs -> attached to the content_item.
+// on-brand asset, rendered IN-APP: copy -> named fields (fielder) -> Satori/resvg
+// PNGs in IG/FB ratios -> public Storage URLs -> attached to the content_item.
 //
-// Rendering changes pixels, not copy or status — it never approves, schedules, or
-// posts (hard rules 1 & 3). Returns 501 when the model or Canva isn't configured,
-// matching the rest of the app's graceful-degradation pattern.
+// Self-hosted: no third-party render account, no per-client plan. Rendering
+// changes pixels, not copy or status — it never approves, schedules, or posts
+// (hard rules 1 & 3).
 
 interface RenderBody {
   id: string;
-  templateKey: CanvaTemplateKey;
+  templateKey: RenderTemplateKey;
+  aspect?: AspectKey;
 }
 
 export async function POST(req: Request) {
-  if (!isAnthropicConfigured() || !isCanvaOAuthConfigured()) {
+  if (!isAnthropicConfigured()) {
     return NextResponse.json(
-      { error: "Rendering needs ANTHROPIC_API_KEY and Canva OAuth configured." },
+      { error: "Rendering needs ANTHROPIC_API_KEY (for the field mapping)." },
       { status: 501 }
     );
   }
@@ -47,7 +46,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
   const { id, templateKey } = body;
-  if (!id || !templateKey || !CANVA_TEMPLATES[templateKey]) {
+  const aspect = isAspectKey(body.aspect) ? body.aspect : DEFAULT_ASPECT;
+  if (!id || !isRenderTemplateKey(templateKey)) {
     return NextResponse.json(
       { error: "id and a valid templateKey are required." },
       { status: 400 }
@@ -67,8 +67,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Content item not found." }, { status: 404 });
   }
 
-  // A template renders one specific format; don't autofill a static into a carousel.
-  const template = CANVA_TEMPLATES[templateKey];
+  // A template renders one specific format; don't render a static into a carousel.
+  const template = RENDER_TEMPLATES[templateKey];
   if (item.format !== template.format) {
     return NextResponse.json(
       {
@@ -79,20 +79,19 @@ export async function POST(req: Request) {
   }
 
   try {
-    // 0. The client's own Canva token (auto-refreshed). Throws if not connected.
-    const accessToken = await getValidAccessToken(clientId);
     // 1. Approved copy -> the template's named fields (logged Haiku pass).
-    const data = await fieldCopyForTemplate(templateKey, item.copy, clientId);
-    // 2. Autofill the brand template and export PNG (Canva owns the pixels).
-    const { pageUrls } = await renderTemplate(template.id, data, accessToken);
-    // 3. Rehost each page into the public bucket (Canva's URLs are temporary).
-    const hosted = await Promise.all(
-      pageUrls.map((url, i) =>
-        rehostImage(url, `${clientId}/${id}/${Date.now()}-${i + 1}.png`)
+    const fields = await fieldCopyForTemplate(templateKey, item.copy, clientId);
+    // 2. Render each page to a PNG in the requested IG/FB ratio (self-hosted).
+    const pages = await renderTemplatePages(templateKey, fields, aspect);
+    // 3. Upload each page to the public bucket -> durable URLs.
+    const stamp = Date.now();
+    const urls = await Promise.all(
+      pages.map((buf, i) =>
+        uploadImage(buf, `${clientId}/${id}/${stamp}-${aspect}-${i + 1}.png`)
       )
     );
     // 4. Attach to the item (cover + all pages). Status and copy are untouched.
-    const updated = await updateContentItemAssets(id, hosted);
+    const updated = await updateContentItemAssets(id, urls);
     return NextResponse.json({ item: updated });
   } catch (err) {
     if (err instanceof QuotaExceededError) {

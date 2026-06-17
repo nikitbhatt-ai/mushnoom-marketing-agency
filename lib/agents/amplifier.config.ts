@@ -41,8 +41,8 @@ const HOOK_CRAFT = `HOOK CRAFT (the scroll-stopper — get this right first):
  * FORMAT PLAYBOOKS — each format is a different craft. The right playbook is
  * injected per generation (one Amplifier call per format) so a carousel, a
  * static, and a reel are each built to their own shape, not from one generic
- * mould. These mirror the published Canva brand templates in
- * lib/integrations/canva-templates.ts — the place a rendered asset ends up.
+ * mould. These mirror the render templates in lib/render/templates.ts — the
+ * shape a rendered asset ends up in.
  */
 export const FORMAT_PLAYBOOKS: Record<ContentFormat, string> = {
   carousel: `FORMAT — CAROUSEL (3–7 slides):

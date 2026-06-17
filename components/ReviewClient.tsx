@@ -5,10 +5,17 @@ import { PageHeader } from "@/components/PageHeader";
 import { Badge, ClaimsBadge, PlatformChip } from "@/components/Badge";
 import { canPublish } from "@/lib/guards";
 import {
-  CANVA_TEMPLATES,
-  type CanvaTemplateKey,
-} from "@/lib/integrations/canva-templates";
+  RENDER_TEMPLATES,
+  type RenderTemplateKey,
+} from "@/lib/render/templates";
+import { SIZES, DEFAULT_ASPECT, type AspectKey } from "@/lib/render/sizes";
 import type { ContentItem } from "@/lib/types";
+
+const ASPECT_LABEL: Record<AspectKey, string> = {
+  portrait: "Portrait 4:5",
+  square: "Square 1:1",
+  story: "Story 9:16",
+};
 
 type Decision = "approved" | "rejected";
 
@@ -196,18 +203,19 @@ function ReviewCard({
   );
 }
 
-/** Render this item's copy into a Canva brand template and show the result. */
+/** Render this item's copy into a brand template (in-app) and show the result. */
 function RenderControls({ item }: { item: ContentItem }) {
   const options = (
-    Object.entries(CANVA_TEMPLATES) as [
-      CanvaTemplateKey,
-      (typeof CANVA_TEMPLATES)[CanvaTemplateKey]
+    Object.entries(RENDER_TEMPLATES) as [
+      RenderTemplateKey,
+      (typeof RENDER_TEMPLATES)[RenderTemplateKey]
     ][]
   ).filter(([, t]) => t.format === item.format);
 
-  const [templateKey, setTemplateKey] = useState<CanvaTemplateKey | "">(
+  const [templateKey, setTemplateKey] = useState<RenderTemplateKey | "">(
     options[0]?.[0] ?? ""
   );
+  const [aspect, setAspect] = useState<AspectKey>(DEFAULT_ASPECT);
   const [status, setStatus] = useState<"idle" | "rendering" | "done" | "error">(
     "idle"
   );
@@ -230,7 +238,7 @@ function RenderControls({ item }: { item: ContentItem }) {
       const res = await fetch("/api/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: item.id, templateKey }),
+        body: JSON.stringify({ id: item.id, templateKey, aspect }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Render failed.");
@@ -250,7 +258,7 @@ function RenderControls({ item }: { item: ContentItem }) {
         </span>
         <select
           value={templateKey}
-          onChange={(e) => setTemplateKey(e.target.value as CanvaTemplateKey)}
+          onChange={(e) => setTemplateKey(e.target.value as RenderTemplateKey)}
           className="rounded-md px-2 py-1 text-xs text-ink"
           style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
         >
@@ -260,13 +268,25 @@ function RenderControls({ item }: { item: ContentItem }) {
             </option>
           ))}
         </select>
+        <select
+          value={aspect}
+          onChange={(e) => setAspect(e.target.value as AspectKey)}
+          className="rounded-md px-2 py-1 text-xs text-ink"
+          style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+        >
+          {(Object.keys(SIZES) as AspectKey[]).map((k) => (
+            <option key={k} value={k}>
+              {ASPECT_LABEL[k]}
+            </option>
+          ))}
+        </select>
         <button
           onClick={render}
           disabled={status === "rendering"}
           className="rounded-md px-3 py-1.5 text-xs text-muted hover:text-ink disabled:opacity-40"
           style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
         >
-          {status === "rendering" ? "Rendering…" : "Render to Canva"}
+          {status === "rendering" ? "Rendering…" : "Render"}
         </button>
         {status === "done" && <span className="text-xs text-ok">Rendered ✓</span>}
         {status === "error" && (

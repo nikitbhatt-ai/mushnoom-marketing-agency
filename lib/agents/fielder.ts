@@ -17,16 +17,15 @@
 import type { ContentCopy } from "../types";
 import { runAgent, type AgentConfig } from "./runAgent";
 import {
-  CANVA_TEMPLATES,
-  type CanvaTemplateKey,
-} from "../integrations/canva-templates";
-import type { AutofillData } from "../integrations/canva";
+  RENDER_TEMPLATES,
+  type RenderTemplateKey,
+} from "../render/templates";
 
 const FIELDER_MODEL = "claude-haiku-4-5-20251001";
 
 /** Build the fielder config for one template: its output schema IS the template's fields. */
-function fielderConfig(templateKey: CanvaTemplateKey): AgentConfig {
-  const { fields } = CANVA_TEMPLATES[templateKey];
+function fielderConfig(templateKey: RenderTemplateKey): AgentConfig {
+  const { fields } = RENDER_TEMPLATES[templateKey];
   const properties: Record<string, unknown> = {};
   for (const f of fields) properties[f] = { type: "string" };
   return {
@@ -50,15 +49,15 @@ Rules:
 }
 
 /**
- * Translate approved copy into a specific template's named autofill fields, ready
- * to hand straight to canva.renderTemplate.
+ * Translate approved copy into a specific template's named fields, ready to hand
+ * straight to the renderer (field name -> value).
  */
 export async function fieldCopyForTemplate(
-  templateKey: CanvaTemplateKey,
+  templateKey: RenderTemplateKey,
   copy: ContentCopy,
   clientId: string
-): Promise<AutofillData> {
-  const template = CANVA_TEMPLATES[templateKey];
+): Promise<Record<string, string>> {
+  const template = RENDER_TEMPLATES[templateKey];
   const input = [
     `Target template: ${template.title}`,
     `Fields to fill: ${template.fields.join(", ")}`,
@@ -76,9 +75,9 @@ export async function fieldCopyForTemplate(
     clientId
   );
 
-  const out: AutofillData = {};
+  const out: Record<string, string> = {};
   for (const f of template.fields) {
-    out[f] = { type: "text", text: data[f] ?? "" };
+    out[f] = data[f] ?? "";
   }
   return out;
 }
