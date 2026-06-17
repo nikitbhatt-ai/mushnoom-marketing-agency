@@ -1,8 +1,7 @@
-// Brand fonts for the renderer, loaded from bundled .ttf files (committed in
-// ./fonts and force-included in the Vercel build via next.config). Liberation
-// fonts are SIL OFL 1.1 licensed, so redistributing them in-repo is fine.
-//
-// "Serif" carries headlines/wordmark; "Sans" carries labels and body.
+// Brand fonts for the renderer, loaded from bundled .woff files (committed in
+// ./fonts and force-included in the Vercel build via next.config). These are the
+// Mushnoom brand fonts per the style guide — Playfair Display (headings) and
+// Inter (body/labels) — both SIL OFL, so redistributing them in-repo is fine.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,21 +9,22 @@ import { join } from "node:path";
 export interface SatoriFont {
   name: string;
   data: Buffer;
-  weight: 400 | 700;
+  weight: number;
   style: "normal";
 }
 
 const dir = join(process.cwd(), "lib/render/fonts");
+const read = (f: string) => readFileSync(join(dir, f));
 
 let cache: SatoriFont[] | null = null;
 
 export function brandFonts(): SatoriFont[] {
   if (!cache) {
     cache = [
-      { name: "Serif", data: readFileSync(join(dir, "LiberationSerif-Regular.ttf")), weight: 400, style: "normal" },
-      { name: "Serif", data: readFileSync(join(dir, "LiberationSerif-Bold.ttf")), weight: 700, style: "normal" },
-      { name: "Sans", data: readFileSync(join(dir, "LiberationSans-Regular.ttf")), weight: 400, style: "normal" },
-      { name: "Sans", data: readFileSync(join(dir, "LiberationSans-Bold.ttf")), weight: 700, style: "normal" },
+      { name: "Playfair Display", data: read("PlayfairDisplay-700.woff"), weight: 700, style: "normal" },
+      { name: "Playfair Display", data: read("PlayfairDisplay-500.woff"), weight: 500, style: "normal" },
+      { name: "Inter", data: read("Inter-400.woff"), weight: 400, style: "normal" },
+      { name: "Inter", data: read("Inter-700.woff"), weight: 700, style: "normal" },
     ];
   }
   return cache;
