@@ -4,6 +4,10 @@ import { useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Badge, ClaimsBadge, PlatformChip } from "@/components/Badge";
 import { canPublish } from "@/lib/guards";
+import {
+  CANVA_TEMPLATES,
+  type CanvaTemplateKey,
+} from "@/lib/integrations/canva-templates";
 import type { ContentItem } from "@/lib/types";
 
 type Decision = "approved" | "rejected";
@@ -186,6 +190,101 @@ function ReviewCard({
           )}
         </div>
       </div>
+
+      <RenderControls item={item} />
+    </div>
+  );
+}
+
+/** Render this item's copy into a Canva brand template and show the result. */
+function RenderControls({ item }: { item: ContentItem }) {
+  const options = (
+    Object.entries(CANVA_TEMPLATES) as [
+      CanvaTemplateKey,
+      (typeof CANVA_TEMPLATES)[CanvaTemplateKey]
+    ][]
+  ).filter(([, t]) => t.format === item.format);
+
+  const [templateKey, setTemplateKey] = useState<CanvaTemplateKey | "">(
+    options[0]?.[0] ?? ""
+  );
+  const [status, setStatus] = useState<"idle" | "rendering" | "done" | "error">(
+    "idle"
+  );
+  const [assetUrl, setAssetUrl] = useState<string | null>(item.assetUrl);
+  const [error, setError] = useState<string | null>(null);
+
+  if (options.length === 0) {
+    return (
+      <div className="mt-4 border-hair-t pt-4 text-xs text-faint">
+        No Canva template for {item.format}s yet.
+      </div>
+    );
+  }
+
+  async function render() {
+    if (!templateKey) return;
+    setStatus("rendering");
+    setError(null);
+    try {
+      const res = await fetch("/api/render", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: item.id, templateKey }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Render failed.");
+      setAssetUrl(data.item?.assetUrl ?? null);
+      setStatus("done");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Render failed.");
+      setStatus("error");
+    }
+  }
+
+  return (
+    <div className="mt-4 border-hair-t pt-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[11px] uppercase tracking-wide text-faint">
+          Render
+        </span>
+        <select
+          value={templateKey}
+          onChange={(e) => setTemplateKey(e.target.value as CanvaTemplateKey)}
+          className="rounded-md px-2 py-1 text-xs text-ink"
+          style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+        >
+          {options.map(([key, t]) => (
+            <option key={key} value={key}>
+              {t.title}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={render}
+          disabled={status === "rendering"}
+          className="rounded-md px-3 py-1.5 text-xs text-muted hover:text-ink disabled:opacity-40"
+          style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+        >
+          {status === "rendering" ? "Rendering…" : "Render to Canva"}
+        </button>
+        {status === "done" && <span className="text-xs text-ok">Rendered ✓</span>}
+        {status === "error" && (
+          <span className="text-xs text-bad">{error}</span>
+        )}
+      </div>
+
+      {assetUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <a href={assetUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block">
+          <img
+            src={assetUrl}
+            alt="Rendered cover"
+            className="h-40 w-auto rounded-md"
+            style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+          />
+        </a>
+      )}
     </div>
   );
 }
