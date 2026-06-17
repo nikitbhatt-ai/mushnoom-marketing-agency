@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { isAnthropicConfigured, QuotaExceededError } from "@/lib/agents/anthropic";
 import { fieldCopyForTemplate } from "@/lib/agents/fielder";
-import { isCanvaConfigured, renderTemplate } from "@/lib/integrations/canva";
+import { renderTemplate } from "@/lib/integrations/canva";
+import {
+  getValidAccessToken,
+  isCanvaOAuthConfigured,
+} from "@/lib/integrations/canva-oauth";
 import { rehostImage } from "@/lib/integrations/storage";
 import {
   CANVA_TEMPLATES,
@@ -29,9 +33,9 @@ interface RenderBody {
 }
 
 export async function POST(req: Request) {
-  if (!isAnthropicConfigured() || !isCanvaConfigured()) {
+  if (!isAnthropicConfigured() || !isCanvaOAuthConfigured()) {
     return NextResponse.json(
-      { error: "Rendering needs ANTHROPIC_API_KEY and CANVA_CONNECT_TOKEN." },
+      { error: "Rendering needs ANTHROPIC_API_KEY and Canva OAuth configured." },
       { status: 501 }
     );
   }
@@ -75,10 +79,12 @@ export async function POST(req: Request) {
   }
 
   try {
+    // 0. The client's own Canva token (auto-refreshed). Throws if not connected.
+    const accessToken = await getValidAccessToken(clientId);
     // 1. Approved copy -> the template's named fields (logged Haiku pass).
     const data = await fieldCopyForTemplate(templateKey, item.copy, clientId);
     // 2. Autofill the brand template and export PNG (Canva owns the pixels).
-    const { pageUrls } = await renderTemplate(template.id, data);
+    const { pageUrls } = await renderTemplate(template.id, data, accessToken);
     // 3. Rehost each page into the public bucket (Canva's URLs are temporary).
     const hosted = await Promise.all(
       pageUrls.map((url, i) =>

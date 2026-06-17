@@ -10,6 +10,7 @@ const NAV = [
   { href: "/calendar", label: "Calendar" },
   { href: "/strategy", label: "Strategy intake", stub: true },
   { href: "/report", label: "Client report", stub: true },
+  { href: "/settings", label: "Settings" },
 ];
 
 export function Sidebar() {

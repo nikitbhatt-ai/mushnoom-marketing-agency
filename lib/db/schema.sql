@@ -118,7 +118,21 @@ create table if not exists usage_log (
   created_at timestamptz not null default now()
 );
 
--- Helpful indexes for the dashboard + cron queries.
+-- ---------------------------------------------------------------------------
+-- canva_connections: per-client Canva OAuth tokens (multi-tenant — each client
+-- connects their own Canva account via the in-app "Connect Canva" button).
+-- Tokens are app secrets: service-role only, never sent to the browser. The app
+-- auto-refreshes the access token (4h life) using the refresh token.
+-- ---------------------------------------------------------------------------
+create table if not exists canva_connections (
+  client_id      uuid primary key references clients(id) on delete cascade,
+  access_token   text not null,
+  refresh_token  text not null,
+  expires_at     timestamptz not null,
+  scopes         text,
+  connected_at   timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
 create index if not exists idx_content_items_client_status on content_items(client_id, status);
 create index if not exists idx_content_items_scheduled_for on content_items(scheduled_for);
 create index if not exists idx_metrics_log_client_metric   on metrics_log(client_id, metric, captured_at);
@@ -138,3 +152,4 @@ alter table post_log      enable row level security;
 alter table metrics_log   enable row level security;
 alter table decisions     enable row level security;
 alter table usage_log     enable row level security;
+alter table canva_connections enable row level security;
