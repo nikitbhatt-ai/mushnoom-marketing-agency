@@ -8,7 +8,11 @@ const nextConfig = {
     // The render route reads bundled .ttf files at runtime; make sure Vercel's
     // file tracing ships them (and the resvg binary) into the serverless function.
     outputFileTracingIncludes: {
-      "/api/render": ["./lib/render/fonts/**", "./node_modules/@resvg/**"],
+      "/api/render": [
+        "./lib/render/fonts/**",
+        "./lib/render/logo/**",
+        "./node_modules/@resvg/**",
+      ],
     },
   },
 };
