@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  consumeOAuthState,
   exchangeCodeForTokens,
   isCanvaOAuthConfigured,
   storeConnection,
@@ -9,23 +10,18 @@ import { getDefaultClientId } from "@/lib/db/queries";
 export const runtime = "nodejs";
 
 // GET /api/canva/callback — Canva redirects here after the user approves.
-// Validates the state, exchanges the code (+ PKCE verifier from the cookie) for
-// tokens, and stores them against the client. Then bounces back to Settings.
-//
-// Nothing here is shown to the user except a redirect; tokens never touch the
-// browser. Errors land on /settings?canva=error so the page can explain.
+// Looks the PKCE verifier back up by `state` (server-side, no cookie), exchanges
+// the code for tokens, and stores them against the client. Then bounces back to
+// Settings. Tokens never touch the browser.
 
 function back(reason: "connected" | "error", detail?: string): NextResponse {
-  const url = new URL("/settings", process.env.CANVA_REDIRECT_URI ?? "http://localhost:3000");
-  url.search = "";
+  const base = process.env.CANVA_REDIRECT_URI ?? "http://localhost:3000";
+  const url = new URL(base);
   url.pathname = "/settings";
+  url.search = "";
   url.searchParams.set("canva", reason);
   if (detail) url.searchParams.set("detail", detail);
-  const res = NextResponse.redirect(url);
-  // One-time cookies have done their job.
-  res.cookies.delete("canva_pkce_verifier");
-  res.cookies.delete("canva_oauth_state");
-  return res;
+  return NextResponse.redirect(url);
 }
 
 export async function GET(req: Request) {
@@ -40,19 +36,9 @@ export async function GET(req: Request) {
   if (denied) return back("error", denied);
   if (!code || !state) return back("error", "missing_code");
 
-  // CSRF: the state we set in /connect must come back unchanged.
-  const cookieHeader = req.headers.get("cookie") ?? "";
-  const cookies = Object.fromEntries(
-    cookieHeader.split(";").map((c) => {
-      const i = c.indexOf("=");
-      return [c.slice(0, i).trim(), decodeURIComponent(c.slice(i + 1))];
-    })
-  );
-  if (!cookies.canva_oauth_state || cookies.canva_oauth_state !== state) {
-    return back("error", "state_mismatch");
-  }
-  const verifier = cookies.canva_pkce_verifier;
-  if (!verifier) return back("error", "missing_verifier");
+  // Look up the verifier we stored when the flow started (CSRF + PKCE in one).
+  const verifier = await consumeOAuthState(state);
+  if (!verifier) return back("error", "state_mismatch");
 
   try {
     const clientId = await getDefaultClientId();

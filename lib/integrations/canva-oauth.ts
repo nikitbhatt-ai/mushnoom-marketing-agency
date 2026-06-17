@@ -70,6 +70,45 @@ export function makeState(): string {
   return b64url(randomBytes(16));
 }
 
+// --- handshake state (server-side, not a cookie) --------------------------
+// We persist the PKCE verifier keyed by `state` so the handshake survives the
+// Canva redirect regardless of cookies, preview-URL domains, or Safari's privacy
+// blocking. The callback consumes (deletes) the row.
+
+const STATE_TTL_MS = 15 * 60 * 1000;
+
+export async function saveOAuthState(
+  state: string,
+  codeVerifier: string
+): Promise<void> {
+  const db = getServiceClient();
+  if (!db) throw new Error("Supabase is not configured.");
+  // Opportunistic cleanup of stale handshakes so the table can't grow unbounded.
+  await db
+    .from("canva_oauth_states")
+    .delete()
+    .lt("created_at", new Date(Date.now() - STATE_TTL_MS).toISOString());
+  const { error } = await db
+    .from("canva_oauth_states")
+    .insert({ state, code_verifier: codeVerifier });
+  if (error) throw new Error(`Failed to store OAuth state: ${error.message}`);
+}
+
+/** Look up and delete the verifier for `state`. Returns null if missing/expired. */
+export async function consumeOAuthState(state: string): Promise<string | null> {
+  const db = getServiceClient();
+  if (!db) throw new Error("Supabase is not configured.");
+  const { data } = await db
+    .from("canva_oauth_states")
+    .select("code_verifier, created_at")
+    .eq("state", state)
+    .maybeSingle();
+  if (!data) return null;
+  await db.from("canva_oauth_states").delete().eq("state", state);
+  if (Date.now() - new Date(data.created_at).getTime() > STATE_TTL_MS) return null;
+  return data.code_verifier;
+}
+
 /** The Canva consent URL to send the user to. */
 export function buildAuthorizeUrl(state: string, codeChallenge: string): string {
   const params = new URLSearchParams({

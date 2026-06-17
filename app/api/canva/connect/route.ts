@@ -5,14 +5,15 @@ import {
   isCanvaOAuthConfigured,
   makeState,
   makeVerifier,
+  saveOAuthState,
 } from "@/lib/integrations/canva-oauth";
 
 export const runtime = "nodejs";
 
 // GET /api/canva/connect — start the Canva OAuth flow.
-// Mints a PKCE verifier + state, stashes them in short-lived httpOnly cookies,
-// and redirects the user to Canva's consent screen. The callback reads the
-// cookies back to complete the exchange.
+// Mints a PKCE verifier + state, stores them server-side keyed by state, and
+// redirects to Canva's consent screen. The callback looks the verifier back up
+// by state — no cookie has to survive the round-trip.
 
 export async function GET() {
   if (!isCanvaOAuthConfigured()) {
@@ -24,17 +25,7 @@ export async function GET() {
 
   const verifier = makeVerifier();
   const state = makeState();
-  const url = buildAuthorizeUrl(state, challengeFor(verifier));
+  await saveOAuthState(state, verifier);
 
-  const res = NextResponse.redirect(url);
-  const cookie = {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax" as const,
-    path: "/",
-    maxAge: 600, // 10 min — the code is short-lived anyway
-  };
-  res.cookies.set("canva_pkce_verifier", verifier, cookie);
-  res.cookies.set("canva_oauth_state", state, cookie);
-  return res;
+  return NextResponse.redirect(buildAuthorizeUrl(state, challengeFor(verifier)));
 }

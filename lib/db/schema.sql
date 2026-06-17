@@ -133,6 +133,18 @@ create table if not exists canva_connections (
   connected_at   timestamptz not null default now(),
   updated_at     timestamptz not null default now()
 );
+
+-- ---------------------------------------------------------------------------
+-- canva_oauth_states: short-lived OAuth handshake state. Holds the PKCE verifier
+-- keyed by the opaque `state` between /connect and /callback, so the handshake
+-- survives the Canva redirect without relying on a browser cookie. Consumed
+-- (deleted) on callback; rows expire fast.
+-- ---------------------------------------------------------------------------
+create table if not exists canva_oauth_states (
+  state         text primary key,
+  code_verifier text not null,
+  created_at    timestamptz not null default now()
+);
 create index if not exists idx_content_items_client_status on content_items(client_id, status);
 create index if not exists idx_content_items_scheduled_for on content_items(scheduled_for);
 create index if not exists idx_metrics_log_client_metric   on metrics_log(client_id, metric, captured_at);
@@ -153,3 +165,4 @@ alter table metrics_log   enable row level security;
 alter table decisions     enable row level security;
 alter table usage_log     enable row level security;
 alter table canva_connections enable row level security;
+alter table canva_oauth_states enable row level security;
