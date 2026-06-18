@@ -9,7 +9,7 @@
 
 import type { RenderTemplateKey } from "./templates";
 import { BRAND, RENDER } from "./brand";
-import { LOGO } from "./logo";
+import { LOGO, ICON } from "./logo";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type El = { type: string; props: { style: Record<string, any>; children?: any; src?: string } };
@@ -31,16 +31,28 @@ const txt = (style: Record<string, any>, s: string): El => ({
 });
 
 // Brand wordmark for the header. Text stand-in until the real logo file is wired
-// in (see logoImage / LOGO in this file) — the single place to swap.
+// in (see LOGO in ./logo) — the single place to swap.
 const wordmark = (): El =>
   LOGO
     ? { type: "img", props: { src: LOGO, style: { height: 40 } } }
     : txt({ fontFamily: BODY, fontWeight: 700, fontSize: 30, letterSpacing: 0.5, color: FG }, "mushnoom");
 
+// Small brand mark pinned to the bottom-right corner (favicon-style). Omitted
+// entirely until an icon file is wired in (see ICON in ./logo).
+const cornerIcon = (): El | null =>
+  ICON
+    ? {
+        type: "img",
+        props: { src: ICON, style: { position: "absolute", right: 64, bottom: 64, width: 88, height: 88 } },
+      }
+    : null;
+
 /** Shared page shell: wordmark header, centered body, optional footer line. */
 function frame(children: El[], footer?: string): El {
+  const icon = cornerIcon();
   return box(
     {
+      position: "relative",
       width: "100%",
       height: "100%",
       flexDirection: "column",
@@ -64,6 +76,7 @@ function frame(children: El[], footer?: string): El {
       box({ justifyContent: "center", height: 46 }, footer
         ? [txt({ fontFamily: BODY, fontSize: 26, letterSpacing: 1, color: ACCENT }, footer)]
         : []),
+      ...(icon ? [icon] : []),
     ]
   );
 }
