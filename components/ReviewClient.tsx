@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Badge, ClaimsBadge, PlatformChip } from "@/components/Badge";
 import { canPublish } from "@/lib/guards";
@@ -349,6 +349,7 @@ function RenderControls({ item }: { item: ContentItem }) {
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [maxPages, setMaxPages] = useState(8); // total pages incl. the hook/cover
+  const [viewIndex, setViewIndex] = useState<number | null>(null); // lightbox
 
   const isDynamic = templateKey ? RENDER_TEMPLATES[templateKey].dynamic : false;
 
@@ -507,7 +508,9 @@ function RenderControls({ item }: { item: ContentItem }) {
                 <img
                   src={url}
                   alt={`Rendered page ${i + 1}`}
-                  className="h-40 w-auto rounded-md"
+                  onClick={() => setViewIndex(i)}
+                  title="Click to preview"
+                  className="h-40 w-auto cursor-zoom-in rounded-md transition-opacity hover:opacity-80"
                   style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
                 />
                 <button
@@ -521,6 +524,96 @@ function RenderControls({ item }: { item: ContentItem }) {
           </div>
         </div>
       )}
+
+      {viewIndex !== null && (
+        <Lightbox
+          pages={pages}
+          index={viewIndex}
+          onIndex={setViewIndex}
+          onClose={() => setViewIndex(null)}
+          onDownload={(i) => download(pages[i], `mushnoom-${item.format}-${i + 1}.png`)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Full-size slide preview with prev/next, a counter, keyboard nav, and Esc/
+ *  click-outside to close. No download needed to inspect a page. */
+function Lightbox({
+  pages,
+  index,
+  onIndex,
+  onClose,
+  onDownload,
+}: {
+  pages: string[];
+  index: number;
+  onIndex: (i: number) => void;
+  onClose: () => void;
+  onDownload: (i: number) => void;
+}) {
+  const prev = () => onIndex((index - 1 + pages.length) % pages.length);
+  const next = () => onIndex((index + 1) % pages.length);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowLeft") prev();
+      else if (e.key === "ArrowRight") next();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [index, pages.length]);
+
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 p-6"
+    >
+      {/* Top bar: counter + close */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="mb-3 flex items-center gap-4 text-xs text-white/80"
+      >
+        <span>
+          {index + 1} / {pages.length}
+        </span>
+        <button onClick={() => onDownload(index)} className="underline hover:text-white">
+          Download
+        </button>
+        <button onClick={onClose} className="hover:text-white" aria-label="Close">
+          Close ✕
+        </button>
+      </div>
+
+      <div onClick={(e) => e.stopPropagation()} className="flex items-center gap-4">
+        {pages.length > 1 && (
+          <button
+            onClick={prev}
+            aria-label="Previous"
+            className="rounded-full bg-white/10 px-3 py-2 text-lg text-white hover:bg-white/20"
+          >
+            ‹
+          </button>
+        )}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={pages[index]}
+          alt={`Slide ${index + 1}`}
+          className="max-h-[85vh] w-auto rounded-md"
+        />
+        {pages.length > 1 && (
+          <button
+            onClick={next}
+            aria-label="Next"
+            className="rounded-full bg-white/10 px-3 py-2 text-lg text-white hover:bg-white/20"
+          >
+            ›
+          </button>
+        )}
+      </div>
     </div>
   );
 }
