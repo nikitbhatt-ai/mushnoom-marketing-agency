@@ -47,6 +47,7 @@ function rowToContentItem(r: any): ContentItem {
       hashtags: copy.hashtags ?? [],
     },
     assetUrl: r.asset_url,
+    assetUrls: copy.asset_urls ?? (r.asset_url ? [r.asset_url] : []),
     status: r.status,
     scheduledFor: r.scheduled_for,
     postedAt: r.posted_at,

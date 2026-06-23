@@ -219,8 +219,11 @@ function RenderControls({ item }: { item: ContentItem }) {
   const [status, setStatus] = useState<"idle" | "rendering" | "done" | "error">(
     "idle"
   );
-  const [assetUrl, setAssetUrl] = useState<string | null>(item.assetUrl);
+  const [pages, setPages] = useState<string[]>(
+    item.assetUrls?.length ? item.assetUrls : item.assetUrl ? [item.assetUrl] : []
+  );
   const [error, setError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
   if (options.length === 0) {
     return (
@@ -242,11 +245,47 @@ function RenderControls({ item }: { item: ContentItem }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Render failed.");
-      setAssetUrl(data.item?.assetUrl ?? null);
+      const urls: string[] = data.item?.assetUrls?.length
+        ? data.item.assetUrls
+        : data.item?.assetUrl
+        ? [data.item.assetUrl]
+        : [];
+      setPages(urls);
       setStatus("done");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Render failed.");
       setStatus("error");
+    }
+  }
+
+  // Force a real file download (the URLs are cross-origin, so the <a download>
+  // attribute is ignored — fetch the bytes and save them via a blob URL).
+  async function download(url: string, filename: string) {
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = href;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(href);
+    } catch {
+      // Fall back to opening it; the user can still save manually.
+      window.open(url, "_blank", "noreferrer");
+    }
+  }
+
+  async function downloadAll() {
+    setDownloading(true);
+    try {
+      for (let i = 0; i < pages.length; i++) {
+        await download(pages[i], `mushnoom-${item.format}-${i + 1}.png`);
+      }
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -294,16 +333,44 @@ function RenderControls({ item }: { item: ContentItem }) {
         )}
       </div>
 
-      {assetUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <a href={assetUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block">
-          <img
-            src={assetUrl}
-            alt="Rendered cover"
-            className="h-40 w-auto rounded-md"
-            style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
-          />
-        </a>
+      {pages.length > 0 && (
+        <div className="mt-3">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] uppercase tracking-wide text-faint">
+              {pages.length === 1 ? "Rendered image" : `${pages.length} pages`}
+            </span>
+            <button
+              onClick={downloadAll}
+              disabled={downloading}
+              className="rounded-md bg-ink px-3 py-1 text-xs text-white disabled:opacity-40"
+            >
+              {downloading
+                ? "Downloading…"
+                : pages.length === 1
+                ? "Download"
+                : "Download all"}
+            </button>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-3">
+            {pages.map((url, i) => (
+              <div key={url} className="flex flex-col items-center gap-1">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={url}
+                  alt={`Rendered page ${i + 1}`}
+                  className="h-40 w-auto rounded-md"
+                  style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+                />
+                <button
+                  onClick={() => download(url, `mushnoom-${item.format}-${i + 1}.png`)}
+                  className="text-[11px] text-muted underline hover:text-ink"
+                >
+                  {pages.length === 1 ? "Download" : `Download p${i + 1}`}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );

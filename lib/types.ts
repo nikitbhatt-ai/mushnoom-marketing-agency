@@ -60,7 +60,10 @@ export interface ContentItem {
   platform: Platform;
   pillar: Pillar;
   copy: ContentCopy;
+  /** Cover image (page 1) of the most recent render, or null. */
   assetUrl: string | null;
+  /** Every rendered page in order. Omitted/empty until the item is rendered. */
+  assetUrls?: string[];
   status: ContentStatus;
   scheduledFor: string | null; // ISO date
   postedAt: string | null;
