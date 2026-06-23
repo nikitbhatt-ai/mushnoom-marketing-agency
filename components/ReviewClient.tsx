@@ -348,6 +348,9 @@ function RenderControls({ item }: { item: ContentItem }) {
   );
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [maxPages, setMaxPages] = useState(8); // total pages incl. the hook/cover
+
+  const isDynamic = templateKey ? RENDER_TEMPLATES[templateKey].dynamic : false;
 
   if (options.length === 0) {
     return (
@@ -365,7 +368,12 @@ function RenderControls({ item }: { item: ContentItem }) {
       const res = await fetch("/api/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: item.id, templateKey, aspect }),
+        body: JSON.stringify({
+          id: item.id,
+          templateKey,
+          aspect,
+          ...(isDynamic ? { maxPages } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Render failed.");
@@ -443,6 +451,23 @@ function RenderControls({ item }: { item: ContentItem }) {
             </option>
           ))}
         </select>
+        {isDynamic && (
+          <label className="flex items-center gap-1.5 text-[11px] text-faint">
+            Max slides
+            <select
+              value={maxPages}
+              onChange={(e) => setMaxPages(Number(e.target.value))}
+              className="rounded-md px-2 py-1 text-xs text-ink"
+              style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+            >
+              {[3, 4, 5, 6, 7, 8].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <button
           onClick={render}
           disabled={status === "rendering"}

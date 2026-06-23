@@ -20,11 +20,13 @@ export async function renderTemplatePages(
   templateKey: RenderTemplateKey,
   copy: ContentCopy,
   fields: Record<string, string>,
-  aspect: AspectKey = DEFAULT_ASPECT
+  aspect: AspectKey = DEFAULT_ASPECT,
+  maxPages?: number
 ): Promise<Buffer[]> {
   const { width, height } = SIZES[aspect];
   const fonts = brandFonts();
-  const pages = buildPages(templateKey, copy, fields);
+  const all = buildPages(templateKey, copy, fields);
+  const pages = maxPages && maxPages > 0 ? all.slice(0, maxPages) : all;
 
   const out: Buffer[] = [];
   for (const page of pages) {

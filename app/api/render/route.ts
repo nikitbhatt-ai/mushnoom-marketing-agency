@@ -29,7 +29,13 @@ interface RenderBody {
   id: string;
   templateKey: RenderTemplateKey;
   aspect?: AspectKey;
+  /** Cap on total rendered pages (incl. the hook/cover). Clamped to 1..8. */
+  maxPages?: number;
 }
+
+// Hard ceiling on rendered pages — IG carousels stay readable, and it bounds
+// cost/time. The UI lets a user pick fewer, never more.
+const MAX_PAGES = 8;
 
 export async function POST(req: Request) {
   if (!isAnthropicConfigured()) {
@@ -47,6 +53,10 @@ export async function POST(req: Request) {
   }
   const { id, templateKey } = body;
   const aspect = isAspectKey(body.aspect) ? body.aspect : DEFAULT_ASPECT;
+  // Clamp to 1..MAX_PAGES; default to the ceiling when unset/invalid.
+  const maxPages = Number.isFinite(body.maxPages)
+    ? Math.min(MAX_PAGES, Math.max(1, Math.floor(body.maxPages as number)))
+    : MAX_PAGES;
   if (!id || !isRenderTemplateKey(templateKey)) {
     return NextResponse.json(
       { error: "id and a valid templateKey are required." },
@@ -85,8 +95,15 @@ export async function POST(req: Request) {
     const fields = template.dynamic
       ? {}
       : await fieldCopyForTemplate(templateKey, item.copy, clientId);
-    // 2. Render each page to a PNG in the requested IG/FB ratio (self-hosted).
-    const pages = await renderTemplatePages(templateKey, item.copy, fields, aspect);
+    // 2. Render each page to a PNG in the requested IG/FB ratio (self-hosted),
+    //    capped at maxPages (dynamic carousels can otherwise run long).
+    const pages = await renderTemplatePages(
+      templateKey,
+      item.copy,
+      fields,
+      aspect,
+      maxPages
+    );
     // 3. Upload each page to the public bucket -> durable URLs.
     const stamp = Date.now();
     const urls = await Promise.all(
