@@ -547,7 +547,9 @@ function DraftCard({
   onRegenerate: () => Promise<void>;
   onSave: (updated: ContentItem) => void;
 }) {
-  const [sent, setSent] = useState(false);
+  const [sent, setSent] = useState(item.status === "in_review");
+  const [sending, setSending] = useState(false);
+  const [sendNote, setSendNote] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
 
@@ -576,6 +578,35 @@ function DraftCard({
       },
     });
     setEditing(false);
+  }
+
+  async function sendToReview() {
+    if (sent || sending) return;
+    // Simulated preview drafts aren't persisted, so there's no row to queue.
+    if (item.id.startsWith("gen-")) {
+      setSent(true);
+      setSendNote("Preview draft — add ANTHROPIC_API_KEY so drafts persist and queue.");
+      return;
+    }
+    setSending(true);
+    setSendNote(null);
+    try {
+      const res = await fetch(`/api/content/${item.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "in_review" }),
+      });
+      if (res.ok) {
+        setSent(true);
+      } else {
+        const { error } = await res.json().catch(() => ({ error: "" }));
+        setSendNote(error || `Couldn't send to review (${res.status}).`);
+      }
+    } catch {
+      setSendNote("Couldn't reach the server.");
+    } finally {
+      setSending(false);
+    }
   }
 
   async function handleRegenerate() {
@@ -679,11 +710,11 @@ function DraftCard({
 
           <div className="mt-4 flex items-center gap-2">
             <button
-              disabled={sent}
-              onClick={() => setSent(true)}
+              disabled={sent || sending}
+              onClick={sendToReview}
               className="rounded-md bg-ink px-3 py-1.5 text-xs text-white disabled:opacity-40"
             >
-              {sent ? "Sent to review ✓" : "Send to review"}
+              {sent ? "Sent to review ✓" : sending ? "Sending…" : "Send to review"}
             </button>
             <button
               onClick={handleRegenerate}
@@ -701,6 +732,12 @@ function DraftCard({
               Edit
             </button>
           </div>
+          {sent && !sendNote && (
+            <p className="mt-2 text-[11px] text-muted">
+              In the review queue now — approve it there to make it publishable.
+            </p>
+          )}
+          {sendNote && <p className="mt-2 text-[11px] text-muted">{sendNote}</p>}
         </>
       )}
     </div>

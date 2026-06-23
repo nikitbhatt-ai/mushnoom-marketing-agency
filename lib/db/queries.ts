@@ -497,3 +497,27 @@ export async function insertContentDrafts(
   if (error || !data) throw new Error(error?.message ?? "insert failed");
   return data.map(rowToContentItem);
 }
+
+/**
+ * Move a draft into the review queue (status `draft` -> `in_review`). This is the
+ * only forward transition this layer makes from the generator; approval,
+ * scheduling and posting stay separate, human-gated steps (hard rules 1 & 3).
+ * Safe to call twice: if the item already advanced, the current row is returned.
+ */
+export async function sendContentItemToReview(id: string): Promise<ContentItem> {
+  const db = getServiceClient();
+  if (!db) throw new Error("Supabase is not configured.");
+  const { data, error } = await db
+    .from("content_items")
+    .update({ status: "in_review" })
+    .eq("id", id)
+    .eq("status", "draft")
+    .select("*, source_files(drive_file_id)")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (data) return rowToContentItem(data);
+  // Nothing updated — it wasn't a `draft` (e.g. already sent). Return as-is.
+  const current = await getContentItemById(id);
+  if (!current) throw new Error("Content item not found.");
+  return current;
+}
