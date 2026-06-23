@@ -9,16 +9,22 @@ import { brandFonts } from "./fonts";
 import { buildPages } from "./layouts";
 import { SIZES, DEFAULT_ASPECT, type AspectKey } from "./sizes";
 import type { RenderTemplateKey } from "./templates";
+import type { ContentCopy } from "../types";
 
-/** Render every page of a template to a PNG buffer, in order. */
+/**
+ * Render every page of a template to a PNG buffer, in order. `copy` drives
+ * dynamic templates (one page per slide); `fields` feeds the fixed templates
+ * (poll, static) via the fielder.
+ */
 export async function renderTemplatePages(
   templateKey: RenderTemplateKey,
+  copy: ContentCopy,
   fields: Record<string, string>,
   aspect: AspectKey = DEFAULT_ASPECT
 ): Promise<Buffer[]> {
   const { width, height } = SIZES[aspect];
   const fonts = brandFonts();
-  const pages = buildPages(templateKey, fields);
+  const pages = buildPages(templateKey, copy, fields);
 
   const out: Buffer[] = [];
   for (const page of pages) {

@@ -18,24 +18,25 @@ export interface RenderTemplate {
   format: ContentFormat;
   /** Named fields the fielder produces; consumed by the layout. */
   fields: readonly string[];
-  /** How many pages/slides this template renders. */
+  /** How many pages/slides this template renders. Ignored when `dynamic`. */
   pages: number;
+  /**
+   * Dynamic templates render one page per generated slide (hook + every slide in
+   * the copy), so the page count follows the copy, not a fixed layout. They skip
+   * the fielder — the slide→page mapping is 1:1, no field-splitting needed.
+   */
+  dynamic?: boolean;
 }
 
 export const RENDER_TEMPLATES: Record<RenderTemplateKey, RenderTemplate> = {
   ingredients_carousel: {
-    title: "Ingredients carousel",
+    // Key kept for back-compat; this is now the general "render every slide"
+    // carousel rather than a fixed 4-slot ingredients layout.
+    title: "Carousel (all slides)",
     format: "carousel",
-    fields: [
-      "hook",
-      "ingredient_1",
-      "benefit_1",
-      "ingredient_2",
-      "benefit_2",
-      "ingredient_3",
-      "benefit_3",
-    ],
-    pages: 4,
+    fields: ["hook"],
+    pages: 0, // variable: 1 (hook) + one per slide
+    dynamic: true,
   },
   poll_carousel: {
     title: "Poll carousel",

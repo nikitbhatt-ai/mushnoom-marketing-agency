@@ -8,6 +8,7 @@
 // share that width).
 
 import type { RenderTemplateKey } from "./templates";
+import type { ContentCopy } from "../types";
 import { BRAND, RENDER } from "./brand";
 import { LOGO, ICON } from "./logo";
 
@@ -84,12 +85,33 @@ function frame(children: El[], footer?: string): El {
 const hookPage = (hook: string, footer?: string): El =>
   frame([txt({ fontFamily: HEAD, fontWeight: 700, fontSize: 78, lineHeight: 1.12 }, hook)], footer);
 
-const ingredientPage = (idx: string, name: string, benefit: string): El =>
-  frame([
+// Split a slide into a bold lead + supporting line when it uses a clear
+// separator ("Term — explanation", "Term: explanation"); otherwise render the
+// whole slide as the headline. Either way no copy is dropped.
+function splitSlide(slide: string): { title: string; body?: string } {
+  const m = slide.match(/^(.{2,48}?)\s*(?:—|–|::|:|\s-\s)\s+(.+)$/);
+  if (m) return { title: m[1].trim(), body: m[2].trim() };
+  return { title: slide.trim() };
+}
+
+// One carousel page per generated slide. A short lead before a separator becomes
+// the headline with the rest as a supporting line; otherwise the whole slide is
+// the headline. Font size steps down for longer text so it still fits.
+const slidePage = (n: number, slide: string): El => {
+  const { title, body } = splitSlide(slide);
+  const idx = String(n).padStart(2, "0");
+  const titleSize = body ? 84 : title.length > 70 ? 50 : title.length > 40 ? 62 : 78;
+  return frame([
     txt({ fontFamily: BODY, fontSize: 24, fontWeight: 700, letterSpacing: 6, color: ACCENT }, idx),
-    txt({ fontFamily: HEAD, fontSize: 92, fontWeight: 700, marginTop: 18, lineHeight: 1.05 }, name),
-    txt({ fontFamily: BODY, fontSize: 38, color: MUTED, marginTop: 20, lineHeight: 1.3 }, benefit),
+    txt(
+      { fontFamily: HEAD, fontSize: titleSize, fontWeight: 700, marginTop: 18, lineHeight: 1.1 },
+      title
+    ),
+    ...(body
+      ? [txt({ fontFamily: BODY, fontSize: 36, color: MUTED, marginTop: 20, lineHeight: 1.35 }, body)]
+      : []),
   ]);
+};
 
 const pollPage = (options: string[]): El =>
   frame([
@@ -122,19 +144,22 @@ const staticPage = (hook: string, body: string): El =>
     txt({ fontFamily: BODY, fontSize: 36, color: MUTED, marginTop: 30, lineHeight: 1.45 }, body),
   ]);
 
-/** Build the ordered pages for a template from its fielded copy. */
+/** Build the ordered pages for a template. The dynamic carousel renders one page
+ *  per slide straight from the approved copy; fixed templates use fielded values. */
 export function buildPages(
   templateKey: RenderTemplateKey,
+  copy: ContentCopy,
   f: Record<string, string>
 ): El[] {
   switch (templateKey) {
-    case "ingredients_carousel":
+    case "ingredients_carousel": {
+      // Dynamic: hook + every slide in the copy, in order — nothing is dropped.
+      const slides = copy.slides.filter((s) => s.trim());
       return [
-        hookPage(f.hook, "Swipe »"),
-        ingredientPage("01", f.ingredient_1, f.benefit_1),
-        ingredientPage("02", f.ingredient_2, f.benefit_2),
-        ingredientPage("03", f.ingredient_3, f.benefit_3),
+        hookPage(copy.hook, "Swipe »"),
+        ...slides.map((s, i) => slidePage(i + 1, s)),
       ];
+    }
     case "poll_carousel":
       return [
         hookPage(f.hook, "Swipe »"),

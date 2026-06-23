@@ -79,10 +79,14 @@ export async function POST(req: Request) {
   }
 
   try {
-    // 1. Approved copy -> the template's named fields (logged Haiku pass).
-    const fields = await fieldCopyForTemplate(templateKey, item.copy, clientId);
+    // 1. Map copy onto the template. Dynamic templates render one page per slide
+    //    straight from the copy (no field-splitting), so they skip the fielder;
+    //    fixed templates (poll, static) still get the logged Haiku pass.
+    const fields = template.dynamic
+      ? {}
+      : await fieldCopyForTemplate(templateKey, item.copy, clientId);
     // 2. Render each page to a PNG in the requested IG/FB ratio (self-hosted).
-    const pages = await renderTemplatePages(templateKey, fields, aspect);
+    const pages = await renderTemplatePages(templateKey, item.copy, fields, aspect);
     // 3. Upload each page to the public bucket -> durable URLs.
     const stamp = Date.now();
     const urls = await Promise.all(
