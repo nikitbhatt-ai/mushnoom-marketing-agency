@@ -46,6 +46,12 @@ export function ReviewClient({ initial }: { initial: ContentItem[] }) {
 
   const pending = items.filter((it) => !decisions[it.id]);
 
+  // Persist an inline edit back into local state. Editing copy clears the claims
+  // check server-side, so reflect that here too — a human must re-confirm.
+  function applyEdit(updated: ContentItem) {
+    setItems((prev) => prev.map((it) => (it.id === updated.id ? updated : it)));
+  }
+
   return (
     <div>
       <PageHeader
@@ -71,6 +77,7 @@ export function ReviewClient({ initial }: { initial: ContentItem[] }) {
             item={item}
             decision={decisions[item.id]}
             onDecide={decide}
+            onEdited={applyEdit}
           />
         ))}
       </div>
@@ -82,13 +89,66 @@ function ReviewCard({
   item,
   decision,
   onDecide,
+  onEdited,
 }: {
   item: ContentItem;
   decision?: Decision;
   onDecide: (id: string, d: Decision) => void;
+  onEdited: (updated: ContentItem) => void;
 }) {
   const flagged = item.claimsVerdict === "review_claim";
   const publishable = canPublish(item);
+
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [hook, setHook] = useState(item.copy.hook);
+  const [slides, setSlides] = useState(item.copy.slides.join("\n"));
+  const [caption, setCaption] = useState(item.copy.caption);
+  const [hashtags, setHashtags] = useState(item.copy.hashtags.join(" "));
+
+  function startEdit() {
+    setHook(item.copy.hook);
+    setSlides(item.copy.slides.join("\n"));
+    setCaption(item.copy.caption);
+    setHashtags(item.copy.hashtags.join(" "));
+    setSaveError(null);
+    setEditing(true);
+  }
+
+  async function saveEdit() {
+    const copy = {
+      hook: hook.trim(),
+      slides: slides.split("\n").map((s) => s.trim()).filter(Boolean),
+      caption: caption.trim(),
+      hashtags: hashtags.split(/\s+/).filter(Boolean),
+    };
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const res = await fetch(`/api/content/${item.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ copy }),
+      });
+      if (res.ok) {
+        const { item: saved } = await res.json();
+        onEdited(saved as ContentItem);
+        setEditing(false);
+      } else {
+        const { error } = await res.json().catch(() => ({ error: "" }));
+        // Keep the edit locally even if it couldn't persist (e.g. preview/mock).
+        onEdited({ ...item, copy, claimsChecked: false });
+        setEditing(false);
+        if (res.status !== 501) setSaveError(error || `Save failed (${res.status}).`);
+      }
+    } catch {
+      onEdited({ ...item, copy, claimsChecked: false });
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="card p-5">
@@ -103,6 +163,50 @@ function ReviewCard({
         <ClaimsBadge verdict={item.claimsVerdict} />
       </div>
 
+      {editing ? (
+        <div className="mt-4 space-y-3">
+          <EditField label="Hook">
+            <input
+              value={hook}
+              onChange={(e) => setHook(e.target.value)}
+              className="w-full rounded-md px-2.5 py-1.5 text-sm text-ink outline-none"
+              style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+            />
+          </EditField>
+          {item.format !== "static" && (
+            <EditField label="Slides (one per line)">
+              <textarea
+                value={slides}
+                onChange={(e) => setSlides(e.target.value)}
+                rows={5}
+                className="w-full rounded-md px-2.5 py-1.5 text-xs text-ink outline-none"
+                style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+              />
+            </EditField>
+          )}
+          <EditField label="Caption">
+            <textarea
+              value={caption}
+              onChange={(e) => setCaption(e.target.value)}
+              rows={3}
+              className="w-full rounded-md px-2.5 py-1.5 text-xs text-ink outline-none"
+              style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+            />
+          </EditField>
+          <EditField label="Hashtags (space-separated)">
+            <input
+              value={hashtags}
+              onChange={(e) => setHashtags(e.target.value)}
+              className="w-full rounded-md px-2.5 py-1.5 text-xs text-ink outline-none"
+              style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+            />
+          </EditField>
+          <p className="text-[11px] text-faint">
+            Saving re-runs the claims gate — you’ll need to approve again.
+          </p>
+          {saveError && <p className="text-[11px] text-bad">{saveError}</p>}
+        </div>
+      ) : (
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div>
           <div className="text-sm font-medium text-ink">{item.copy.hook}</div>
@@ -154,6 +258,7 @@ function ReviewCard({
           )}
         </div>
       </div>
+      )}
 
       {/* Actions */}
       <div className="mt-5 flex items-center justify-between border-hair-t pt-4">
@@ -166,7 +271,25 @@ function ReviewCard({
               : "Confirm the claims check by approving.")}
         </div>
         <div className="flex items-center gap-2">
-          {decision ? (
+          {editing ? (
+            <>
+              <button
+                onClick={() => setEditing(false)}
+                disabled={saving}
+                className="rounded-md px-3 py-1.5 text-xs text-muted hover:text-ink disabled:opacity-40"
+                style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveEdit}
+                disabled={saving}
+                className="rounded-md bg-ink px-3 py-1.5 text-xs text-white disabled:opacity-40"
+              >
+                {saving ? "Saving…" : "Save"}
+              </button>
+            </>
+          ) : decision ? (
             <Badge tone={decision === "approved" ? "ok" : "bad"}>
               {decision === "approved" ? "Approved ✓" : "Rejected"}
             </Badge>
@@ -180,6 +303,7 @@ function ReviewCard({
                 Reject
               </button>
               <button
+                onClick={startEdit}
                 className="rounded-md px-3 py-1.5 text-xs text-muted hover:text-ink"
                 style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
               >
@@ -372,6 +496,21 @@ function RenderControls({ item }: { item: ContentItem }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function EditField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div className="mb-1 text-[11px] uppercase tracking-wide text-faint">{label}</div>
+      {children}
     </div>
   );
 }
