@@ -96,13 +96,17 @@ function splitSlide(slide: string): { title: string; body?: string } {
 
 // One carousel page per generated slide. A short lead before a separator becomes
 // the headline with the rest as a supporting line; otherwise the whole slide is
-// the headline. Font size steps down for longer text so it still fits.
-const slidePage = (n: number, slide: string): El => {
+// the headline. Font size steps down for longer text so it still fits. The index
+// label (01, 02…) is optional — off by default, since numbering makes slides
+// awkward to reorder or drop.
+const slidePage = (n: number, slide: string, numbered: boolean): El => {
   const { title, body } = splitSlide(slide);
   const idx = String(n).padStart(2, "0");
   const titleSize = body ? 84 : title.length > 70 ? 50 : title.length > 40 ? 62 : 78;
   return frame([
-    txt({ fontFamily: BODY, fontSize: 24, fontWeight: 700, letterSpacing: 6, color: ACCENT }, idx),
+    ...(numbered
+      ? [txt({ fontFamily: BODY, fontSize: 24, fontWeight: 700, letterSpacing: 6, color: ACCENT }, idx)]
+      : []),
     txt(
       { fontFamily: HEAD, fontSize: titleSize, fontWeight: 700, marginTop: 18, lineHeight: 1.1 },
       title
@@ -144,12 +148,19 @@ const staticPage = (hook: string, body: string): El =>
     txt({ fontFamily: BODY, fontSize: 36, color: MUTED, marginTop: 30, lineHeight: 1.45 }, body),
   ]);
 
+/** Visual options the user controls per render (beyond copy + template). */
+export interface RenderOptions {
+  /** Show the 01/02… index label on dynamic carousel slides. Default false. */
+  numbered?: boolean;
+}
+
 /** Build the ordered pages for a template. The dynamic carousel renders one page
  *  per slide straight from the approved copy; fixed templates use fielded values. */
 export function buildPages(
   templateKey: RenderTemplateKey,
   copy: ContentCopy,
-  f: Record<string, string>
+  f: Record<string, string>,
+  opts: RenderOptions = {}
 ): El[] {
   switch (templateKey) {
     case "ingredients_carousel": {
@@ -157,7 +168,7 @@ export function buildPages(
       const slides = copy.slides.filter((s) => s.trim());
       return [
         hookPage(copy.hook, "Swipe »"),
-        ...slides.map((s, i) => slidePage(i + 1, s)),
+        ...slides.map((s, i) => slidePage(i + 1, s, opts.numbered ?? false)),
       ];
     }
     case "poll_carousel":

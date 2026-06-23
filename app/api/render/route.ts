@@ -31,6 +31,8 @@ interface RenderBody {
   aspect?: AspectKey;
   /** Cap on total rendered pages (incl. the hook/cover). Clamped to 1..8. */
   maxPages?: number;
+  /** Show the 01/02… index label on dynamic carousel slides. Default false. */
+  numbered?: boolean;
 }
 
 // Hard ceiling on rendered pages — IG carousels stay readable, and it bounds
@@ -102,7 +104,7 @@ export async function POST(req: Request) {
       item.copy,
       fields,
       aspect,
-      maxPages
+      { maxPages, numbered: body.numbered === true }
     );
     // 3. Upload each page to the public bucket -> durable URLs.
     const stamp = Date.now();

@@ -6,7 +6,7 @@
 import satori from "satori";
 import { Resvg } from "@resvg/resvg-js";
 import { brandFonts } from "./fonts";
-import { buildPages } from "./layouts";
+import { buildPages, type RenderOptions } from "./layouts";
 import { SIZES, DEFAULT_ASPECT, type AspectKey } from "./sizes";
 import type { RenderTemplateKey } from "./templates";
 import type { ContentCopy } from "../types";
@@ -14,18 +14,20 @@ import type { ContentCopy } from "../types";
 /**
  * Render every page of a template to a PNG buffer, in order. `copy` drives
  * dynamic templates (one page per slide); `fields` feeds the fixed templates
- * (poll, static) via the fielder.
+ * (poll, static) via the fielder. `opts` carries per-render visual choices
+ * (maxPages cap, slide numbering, …).
  */
 export async function renderTemplatePages(
   templateKey: RenderTemplateKey,
   copy: ContentCopy,
   fields: Record<string, string>,
   aspect: AspectKey = DEFAULT_ASPECT,
-  maxPages?: number
+  opts: RenderOptions & { maxPages?: number } = {}
 ): Promise<Buffer[]> {
   const { width, height } = SIZES[aspect];
   const fonts = brandFonts();
-  const all = buildPages(templateKey, copy, fields);
+  const all = buildPages(templateKey, copy, fields, opts);
+  const { maxPages } = opts;
   const pages = maxPages && maxPages > 0 ? all.slice(0, maxPages) : all;
 
   const out: Buffer[] = [];

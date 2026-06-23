@@ -349,6 +349,7 @@ function RenderControls({ item }: { item: ContentItem }) {
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [maxPages, setMaxPages] = useState(8); // total pages incl. the hook/cover
+  const [numbered, setNumbered] = useState(false); // 01/02… labels, off by default
   const [viewIndex, setViewIndex] = useState<number | null>(null); // lightbox
 
   const isDynamic = templateKey ? RENDER_TEMPLATES[templateKey].dynamic : false;
@@ -373,7 +374,7 @@ function RenderControls({ item }: { item: ContentItem }) {
           id: item.id,
           templateKey,
           aspect,
-          ...(isDynamic ? { maxPages } : {}),
+          ...(isDynamic ? { maxPages, numbered } : {}),
         }),
       });
       const data = await res.json();
@@ -467,6 +468,16 @@ function RenderControls({ item }: { item: ContentItem }) {
                 </option>
               ))}
             </select>
+          </label>
+        )}
+        {isDynamic && (
+          <label className="flex items-center gap-1.5 text-[11px] text-faint">
+            <input
+              type="checkbox"
+              checked={numbered}
+              onChange={(e) => setNumbered(e.target.checked)}
+            />
+            Number slides
           </label>
         )}
         <button
