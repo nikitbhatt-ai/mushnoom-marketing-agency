@@ -10,7 +10,7 @@ export interface SatoriFont {
   name: string;
   data: Buffer;
   weight: number;
-  style: "normal";
+  style: "normal" | "italic";
 }
 
 const dir = join(process.cwd(), "lib/render/fonts");

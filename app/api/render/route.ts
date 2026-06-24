@@ -3,6 +3,7 @@ import { isAnthropicConfigured, QuotaExceededError } from "@/lib/agents/anthropi
 import { fieldCopyForTemplate } from "@/lib/agents/fielder";
 import { directRenderOptions } from "@/lib/agents/director";
 import { renderTemplatePages } from "@/lib/render/renderer";
+import { loadBrandKit } from "@/lib/render/loadBrandKit";
 import type { RenderOptions } from "@/lib/render/layouts";
 import {
   RENDER_TEMPLATES,
@@ -122,8 +123,10 @@ export async function POST(req: Request) {
     const fields = template.dynamic
       ? {}
       : await fieldCopyForTemplate(templateKey, item.copy, clientId);
-    // 3. Render each page to a PNG in the requested IG/FB ratio (self-hosted).
-    const pages = await renderTemplatePages(templateKey, item.copy, fields, aspect, options);
+    // 3. Render each page to a PNG in the requested IG/FB ratio (self-hosted),
+    //    using this client's brand kit (colors/fonts/logo; bundled fallback).
+    const brand = await loadBrandKit(clientId);
+    const pages = await renderTemplatePages(templateKey, item.copy, fields, aspect, options, brand);
     // 4. Upload each page to the public bucket -> durable URLs.
     const stamp = Date.now();
     const urls = await Promise.all(

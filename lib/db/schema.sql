@@ -145,6 +145,40 @@ create table if not exists canva_oauth_states (
   code_verifier text not null,
   created_at    timestamptz not null default now()
 );
+
+-- ---------------------------------------------------------------------------
+-- brand_kits: the per-client visual identity the renderer uses (multi-tenant).
+-- One row per client. Colors are render roles; fonts name a family (bundled or
+-- uploaded via brand_fonts); logo/icon are paths in the public brand-assets
+-- bucket. Anything null falls back to the bundled defaults, so a client with no
+-- kit still renders.
+-- ---------------------------------------------------------------------------
+create table if not exists brand_kits (
+  client_id    uuid primary key references clients(id) on delete cascade,
+  colors       jsonb,                    -- { bg, surface, accent, text }
+  heading_font text,                     -- family name (e.g. "Playfair Display")
+  body_font    text,                     -- family name (e.g. "Inter")
+  logo_path    text,                     -- path in brand-assets bucket, or null
+  icon_path    text,                     -- path in brand-assets bucket, or null
+  updated_at   timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------------
+-- brand_fonts: custom fonts a client uploads. Each row is one weight/style of a
+-- family; the renderer loads every row for the client and hands the binaries to
+-- Satori, while brand_kits.heading_font/body_font pick which family to use.
+-- ---------------------------------------------------------------------------
+create table if not exists brand_fonts (
+  id           uuid primary key default gen_random_uuid(),
+  client_id    uuid not null references clients(id) on delete cascade,
+  family       text not null,            -- "Poppins"
+  weight       integer not null default 400,
+  style        text not null default 'normal' check (style in ('normal','italic')),
+  storage_path text not null,            -- path in brand-assets bucket
+  created_at   timestamptz not null default now()
+);
+create index if not exists idx_brand_fonts_client on brand_fonts(client_id);
+
 create index if not exists idx_content_items_client_status on content_items(client_id, status);
 create index if not exists idx_content_items_scheduled_for on content_items(scheduled_for);
 create index if not exists idx_metrics_log_client_metric   on metrics_log(client_id, metric, captured_at);
@@ -166,3 +200,5 @@ alter table decisions     enable row level security;
 alter table usage_log     enable row level security;
 alter table canva_connections enable row level security;
 alter table canva_oauth_states enable row level security;
+alter table brand_kits        enable row level security;
+alter table brand_fonts       enable row level security;
