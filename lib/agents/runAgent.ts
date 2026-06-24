@@ -18,7 +18,7 @@ import {
 } from "./anthropic";
 
 export interface AgentConfig {
-  name: "amplifier" | "analyst" | "strategist" | "fielder";
+  name: "amplifier" | "analyst" | "strategist" | "fielder" | "director";
   model: string; // e.g. "claude-haiku-4-5" | "claude-sonnet-4-6" | "claude-opus-4-8"
   systemPrompt: string; // the skill lives here; fix output by fixing this
   /** JSON schema describing the structured output we expect back. */

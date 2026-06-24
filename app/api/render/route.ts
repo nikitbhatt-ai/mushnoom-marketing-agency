@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { isAnthropicConfigured, QuotaExceededError } from "@/lib/agents/anthropic";
 import { fieldCopyForTemplate } from "@/lib/agents/fielder";
+import { directRenderOptions } from "@/lib/agents/director";
 import { renderTemplatePages } from "@/lib/render/renderer";
+import type { RenderOptions } from "@/lib/render/layouts";
 import {
   RENDER_TEMPLATES,
   isRenderTemplateKey,
@@ -29,15 +31,32 @@ interface RenderBody {
   id: string;
   templateKey: RenderTemplateKey;
   aspect?: AspectKey;
-  /** Cap on total rendered pages (incl. the hook/cover). Clamped to 1..8. */
-  maxPages?: number;
-  /** Show the 01/02… index label on dynamic carousel slides. Default false. */
-  numbered?: boolean;
+  /** Structured styling chosen via UI controls. */
+  options?: RenderOptions;
+  /** Free-text styling request; interpreted by the director into options. */
+  artDirection?: string;
 }
 
 // Hard ceiling on rendered pages — IG carousels stay readable, and it bounds
 // cost/time. The UI lets a user pick fewer, never more.
 const MAX_PAGES = 8;
+
+// Trust nothing from the client or the director: keep only known fields with
+// valid values, so a bad value can never reach the layout.
+function sanitizeOptions(o: Partial<RenderOptions> | undefined): RenderOptions {
+  if (!o || typeof o !== "object") return {};
+  const out: RenderOptions = {};
+  if (o.align === "left" || o.align === "center") out.align = o.align;
+  if (o.textSize === "small" || o.textSize === "normal" || o.textSize === "large")
+    out.textSize = o.textSize;
+  if (typeof o.showSwipe === "boolean") out.showSwipe = o.showSwipe;
+  if (typeof o.numbered === "boolean") out.numbered = o.numbered;
+  if (typeof o.cta === "boolean") out.cta = o.cta;
+  if (typeof o.ctaText === "string") out.ctaText = o.ctaText.slice(0, 60);
+  if (Number.isFinite(o.maxPages))
+    out.maxPages = Math.min(MAX_PAGES, Math.max(1, Math.floor(o.maxPages as number)));
+  return out;
+}
 
 export async function POST(req: Request) {
   if (!isAnthropicConfigured()) {
@@ -55,10 +74,6 @@ export async function POST(req: Request) {
   }
   const { id, templateKey } = body;
   const aspect = isAspectKey(body.aspect) ? body.aspect : DEFAULT_ASPECT;
-  // Clamp to 1..MAX_PAGES; default to the ceiling when unset/invalid.
-  const maxPages = Number.isFinite(body.maxPages)
-    ? Math.min(MAX_PAGES, Math.max(1, Math.floor(body.maxPages as number)))
-    : MAX_PAGES;
   if (!id || !isRenderTemplateKey(templateKey)) {
     return NextResponse.json(
       { error: "id and a valid templateKey are required." },
@@ -91,29 +106,32 @@ export async function POST(req: Request) {
   }
 
   try {
-    // 1. Map copy onto the template. Dynamic templates render one page per slide
+    // 1. Resolve styling: UI controls form the base; a free-text art-direction
+    //    note (interpreted by the logged director pass) overrides the fields it
+    //    mentions. Then enforce the page ceiling.
+    const explicit = sanitizeOptions(body.options);
+    const directed = body.artDirection?.trim()
+      ? sanitizeOptions(await directRenderOptions(body.artDirection.trim(), clientId))
+      : {};
+    const options: RenderOptions = { ...explicit, ...directed };
+    options.maxPages = Number.isFinite(options.maxPages) ? options.maxPages : MAX_PAGES;
+
+    // 2. Map copy onto the template. Dynamic templates render one page per slide
     //    straight from the copy (no field-splitting), so they skip the fielder;
     //    fixed templates (poll, static) still get the logged Haiku pass.
     const fields = template.dynamic
       ? {}
       : await fieldCopyForTemplate(templateKey, item.copy, clientId);
-    // 2. Render each page to a PNG in the requested IG/FB ratio (self-hosted),
-    //    capped at maxPages (dynamic carousels can otherwise run long).
-    const pages = await renderTemplatePages(
-      templateKey,
-      item.copy,
-      fields,
-      aspect,
-      { maxPages, numbered: body.numbered === true }
-    );
-    // 3. Upload each page to the public bucket -> durable URLs.
+    // 3. Render each page to a PNG in the requested IG/FB ratio (self-hosted).
+    const pages = await renderTemplatePages(templateKey, item.copy, fields, aspect, options);
+    // 4. Upload each page to the public bucket -> durable URLs.
     const stamp = Date.now();
     const urls = await Promise.all(
       pages.map((buf, i) =>
         uploadImage(buf, `${clientId}/${id}/${stamp}-${aspect}-${i + 1}.png`)
       )
     );
-    // 4. Attach to the item (cover + all pages). Status and copy are untouched.
+    // 5. Attach to the item (cover + all pages). Status and copy are untouched.
     const updated = await updateContentItemAssets(id, urls);
     return NextResponse.json({ item: updated });
   } catch (err) {

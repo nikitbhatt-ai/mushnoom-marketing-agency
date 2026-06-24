@@ -22,7 +22,7 @@ export async function renderTemplatePages(
   copy: ContentCopy,
   fields: Record<string, string>,
   aspect: AspectKey = DEFAULT_ASPECT,
-  opts: RenderOptions & { maxPages?: number } = {}
+  opts: RenderOptions = {}
 ): Promise<Buffer[]> {
   const { width, height } = SIZES[aspect];
   const fonts = brandFonts();

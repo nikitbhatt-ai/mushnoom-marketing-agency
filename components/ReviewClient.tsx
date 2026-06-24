@@ -350,6 +350,12 @@ function RenderControls({ item }: { item: ContentItem }) {
   const [downloading, setDownloading] = useState(false);
   const [maxPages, setMaxPages] = useState(8); // total pages incl. the hook/cover
   const [numbered, setNumbered] = useState(false); // 01/02… labels, off by default
+  const [align, setAlign] = useState<"center" | "left">("center");
+  const [textSize, setTextSize] = useState<"small" | "normal" | "large">("normal");
+  const [showSwipe, setShowSwipe] = useState(true);
+  const [cta, setCta] = useState(false);
+  const [ctaText, setCtaText] = useState("");
+  const [artDirection, setArtDirection] = useState("");
   const [viewIndex, setViewIndex] = useState<number | null>(null); // lightbox
 
   const isDynamic = templateKey ? RENDER_TEMPLATES[templateKey].dynamic : false;
@@ -374,7 +380,14 @@ function RenderControls({ item }: { item: ContentItem }) {
           id: item.id,
           templateKey,
           aspect,
-          ...(isDynamic ? { maxPages, numbered } : {}),
+          options: {
+            align,
+            textSize,
+            ...(isDynamic
+              ? { maxPages, numbered, showSwipe, cta, ctaText: cta ? ctaText : undefined }
+              : {}),
+          },
+          ...(artDirection.trim() ? { artDirection: artDirection.trim() } : {}),
         }),
       });
       const data = await res.json();
@@ -453,33 +466,6 @@ function RenderControls({ item }: { item: ContentItem }) {
             </option>
           ))}
         </select>
-        {isDynamic && (
-          <label className="flex items-center gap-1.5 text-[11px] text-faint">
-            Max slides
-            <select
-              value={maxPages}
-              onChange={(e) => setMaxPages(Number(e.target.value))}
-              className="rounded-md px-2 py-1 text-xs text-ink"
-              style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
-            >
-              {[3, 4, 5, 6, 7, 8].map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {isDynamic && (
-          <label className="flex items-center gap-1.5 text-[11px] text-faint">
-            <input
-              type="checkbox"
-              checked={numbered}
-              onChange={(e) => setNumbered(e.target.checked)}
-            />
-            Number slides
-          </label>
-        )}
         <button
           onClick={render}
           disabled={status === "rendering"}
@@ -492,6 +478,89 @@ function RenderControls({ item }: { item: ContentItem }) {
         {status === "error" && (
           <span className="text-xs text-bad">{error}</span>
         )}
+      </div>
+
+      {/* Style controls — apply on the next Render. */}
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <label className="flex items-center gap-1.5 text-[11px] text-faint">
+          Align
+          <select
+            value={align}
+            onChange={(e) => setAlign(e.target.value as "center" | "left")}
+            className="rounded-md px-2 py-1 text-xs text-ink"
+            style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+          >
+            <option value="center">Center</option>
+            <option value="left">Left</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-1.5 text-[11px] text-faint">
+          Text
+          <select
+            value={textSize}
+            onChange={(e) => setTextSize(e.target.value as "small" | "normal" | "large")}
+            className="rounded-md px-2 py-1 text-xs text-ink"
+            style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+          >
+            <option value="small">Small</option>
+            <option value="normal">Normal</option>
+            <option value="large">Large</option>
+          </select>
+        </label>
+        {isDynamic && (
+          <>
+            <label className="flex items-center gap-1.5 text-[11px] text-faint">
+              Max slides
+              <select
+                value={maxPages}
+                onChange={(e) => setMaxPages(Number(e.target.value))}
+                className="rounded-md px-2 py-1 text-xs text-ink"
+                style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+              >
+                {[3, 4, 5, 6, 7, 8].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5 text-[11px] text-faint">
+              <input type="checkbox" checked={numbered} onChange={(e) => setNumbered(e.target.checked)} />
+              Number slides
+            </label>
+            <label className="flex items-center gap-1.5 text-[11px] text-faint">
+              <input type="checkbox" checked={showSwipe} onChange={(e) => setShowSwipe(e.target.checked)} />
+              Swipe prompt
+            </label>
+            <label className="flex items-center gap-1.5 text-[11px] text-faint">
+              <input type="checkbox" checked={cta} onChange={(e) => setCta(e.target.checked)} />
+              CTA slide
+            </label>
+            {cta && (
+              <input
+                value={ctaText}
+                onChange={(e) => setCtaText(e.target.value)}
+                placeholder="CTA text, e.g. Shop now »"
+                className="rounded-md px-2 py-1 text-xs text-ink outline-none"
+                style={{ borderWidth: "0.5px", borderColor: "#e6e6e6", width: 180 }}
+              />
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Free-text art direction — interpreted into the controls above on render. */}
+      <div className="mt-2">
+        <input
+          value={artDirection}
+          onChange={(e) => setArtDirection(e.target.value)}
+          placeholder="Art direction (optional) — e.g. “punchier, left-aligned, add a Shop now CTA, keep to 5 slides”"
+          className="w-full rounded-md px-2.5 py-1.5 text-xs text-ink outline-none"
+          style={{ borderWidth: "0.5px", borderColor: "#e6e6e6" }}
+        />
+        <p className="mt-1 text-[10px] text-faint">
+          Plain-English styling — applied on the next Render, and it overrides the controls above where they conflict.
+        </p>
       </div>
 
       {pages.length > 0 && (
